@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define DEBUG 0
+
 /**
  * @brief Read a text file into a buffer.
  * WARNING: You must free() the returned char*!
@@ -53,7 +55,9 @@ int main(void)
 
     char *text = read("input.txt");
 
+#if DEBUG
     printf("text: \"%s\"\n\n", text);
+#endif
 
     // List of entries
     entry_t entries[100];
@@ -61,15 +65,19 @@ int main(void)
 
     // Parse the text to obtain tokens.
     const char delims[] = "(), \n";
-    // printf("Tokens: ");
+
+#if DEBUG
+    printf("Tokens: ");
+#endif
 
     char *token = strtok(text, delims); // TODO where are these tokens stored? Heap?
     int token_i = 0;
 
     while (token != NULL)
     {
-        // printf("\"%s\", ", token);
-
+#if DEBUG
+        printf("\"%s\", ", token);
+#endif
         int id;
         char *action;
         char *topic;
@@ -93,35 +101,55 @@ int main(void)
 
             // Construct the entry
             entries[entries_size++] = (entry_t){id, action, topic};
+#if DEBUG
+            printf("\n\tentries[%d] = {%d, %s, %s}\n", entries_size-1, id, action, topic);
+#endif
         }
 
         // Get next token
         token = strtok(NULL, delims);
     } // End of while
 
-    free(text);
 
     // Print all the entries
+#if DEBUG
     printf("\n\nEntries:\n");
+#endif
+
     for (unsigned i = 0; i < entries_size; i++)
     {
         entry_t *e = &entries[i];
 
+#if DEBUG
+        printf("Read entry {%d, %s, %s}\n", e->id, e->action, e->topic);
+#endif
+
         // Get cooresponding score from user action
         int score;
         if (strcmp(e->action, "P") == 0) // Post
+        {
             score = 50;
+        }
         else if (strcmp(e->action, "L") == 0) // Like
+        {
             score = 20;
+        }
         else if (strcmp(e->action, "D") == 0) // Dislike
+        {
             score = -10;
+        }
         else if (strcmp(e->action, "C") == 0) // Comment
+        {
             score = 30;
+        }
         else if (strcmp(e->action, "S") == 0) // Share
+        {
             score = 40;
+        }
 
         printf("(%d, %s, %d)\n", e->id, e->topic, score);
     }
 
+    free(text);
     return 0;
 }
