@@ -127,25 +127,15 @@ int main(void)
         // Get cooresponding score from user action
         int score;
         if (strcmp(e->action, "P") == 0) // Post
-        {
             score = 50;
-        }
         else if (strcmp(e->action, "L") == 0) // Like
-        {
             score = 20;
-        }
         else if (strcmp(e->action, "D") == 0) // Dislike
-        {
             score = -10;
-        }
         else if (strcmp(e->action, "C") == 0) // Comment
-        {
             score = 30;
-        }
         else if (strcmp(e->action, "S") == 0) // Share
-        {
             score = 40;
-        }
 
         printf("(%d, %s, %d)\n", e->id, e->topic, score);
     }
