@@ -121,7 +121,5 @@ int main(void)
     }
 
     free(text);
-
-    printf("Done.\n");
     return 0;
 }
