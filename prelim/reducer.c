@@ -10,7 +10,7 @@ typedef struct
     int id;
     char *topic;
     int accum_score; // This ID's accumulated score for this topic.
-} total_score_t;
+} score_entry_t;
 
 typedef enum
 {
@@ -22,21 +22,19 @@ typedef enum
 int main(void)
 {
     // Buffer to hold lines as they come in via stdin.
-    const unsigned BUF_SIZE = 100;
-    char text[BUF_SIZE];
+    const unsigned TEXT_BUF_SIZE = 100;
+    char text[TEXT_BUF_SIZE];
     // Used for token parsing.
     const char delims[] = "(), \n";
 
     TokenIndex token_idx = ID_idx;
-
-    // Array of entries for accumulated scores
-    char *current_topic;
-    int current_score = 0;
+    score_entry_t score_entries[100];
+    int score_entries_size = 0;
 
     while (true)
     {
         // Get next line, delimited by newline.
-        fgets(text, BUF_SIZE, stdin);
+        fgets(text, TEXT_BUF_SIZE, stdin);
 
 #if DEBUG
         printf("Got \"%s\"\n", text);
@@ -44,9 +42,8 @@ int main(void)
 
         // If there is nothing else to read, we're done.
         if (strcmp(text, "Done.\n") == 0)
-        {
             break;
-        }
+        
 
         // Temp variables to construct the entry
         int id;
@@ -76,8 +73,17 @@ int main(void)
                 score = atoi(token);
 
                 // Construct the entry
+                score_entries[score_entries_size++] = (score_entry_t){
+                    id, topic, score
+                };
 
+
+                // Iterate through each entry in score_entries.
+                // If the topic changes, print the accumulated value tuple.
+                // If the user changes, start over from the beginning.
                 
+
+
                 token_idx = ID_idx;
                 break;
             } // end of switch
@@ -85,7 +91,7 @@ int main(void)
             // Get next token
             token = strtok(NULL, delims);
         } // end of while (token != NULL)
-    
+
     } // end of while (true)
 
     printf("Done.\n");
