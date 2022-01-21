@@ -6,6 +6,13 @@
 #define TOTAL_IDS 10
 #define TOTAL_TOPICS 10
 
+char *ids[TOTAL_IDS];
+char *topics[TOTAL_IDS][TOTAL_TOPICS]; // List of topics for each ID
+int total_score[TOTAL_IDS][TOTAL_TOPICS];
+// Indexes to traverse through the matrix of scores.
+int id_size = 0;
+int topic_sizes[TOTAL_TOPICS] = {0}; // Initialize to 0
+
 /**
  * @brief Read a text file into a buffer.
  * WARNING: You must free() the returned char*!
@@ -28,12 +35,6 @@ char *read(void)
 
 void update_total_scores(char *id, char *topic, int score)
 {
-    static char *ids[TOTAL_IDS];
-    static char *topics[TOTAL_IDS][TOTAL_TOPICS]; // List of topics for each ID
-    static int total_score[TOTAL_IDS][TOTAL_TOPICS];
-    // Indexes to traverse through the matrix of scores.
-    static int id_size = 0;
-    static int topic_sizes[TOTAL_TOPICS] = {0}; // Initialize to 0
 
     bool found_id = false;
     // First, try to find the ID.
@@ -91,7 +92,7 @@ void update_total_scores(char *id, char *topic, int score)
 
         // Create the new topic.
         topics[id_size][topic_sizes[id_size]++] = topic;
-        
+
         // Finally, add the intial score for this new id
         total_score[id_size][0] = score;
 
@@ -137,6 +138,16 @@ int main(void)
 
         token = strtok(NULL, delims);
     } // while (token != NULL)
+
+    // Finally, print out very last ID's entries
+    // Iterate through the last ID's topics and print them out
+    int last_id = id_size - 1;
+    for (int topic_idx = 0; topic_idx < topic_sizes[last_id]; topic_idx++)
+    {
+        int score = total_score[last_id][topic_idx];
+
+        printf("(%s, %s, %d)\n", ids[last_id], topics[last_id][topic_idx], score);
+    }
 
     free(text);
     return 0;
