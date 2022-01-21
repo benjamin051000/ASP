@@ -3,8 +3,8 @@
 #include <string.h> // for strtok()
 #include <stdbool.h>
 
-#define TOTAL_IDS 100
-#define TOTAL_TOPICS 100
+#define TOTAL_IDS 10
+#define TOTAL_TOPICS 10
 
 /**
  * @brief Read a text file into a buffer.
@@ -60,7 +60,12 @@ void update_total_scores(char *id, char *topic, int score)
             if (!found_topic)
             {
                 // Create the new topic.
-                topics[id_idx][topic_sizes[id_idx]++] = topic;
+                topics[id_idx][topic_sizes[id_idx]] = topic;
+
+                // Assign the score.
+                total_score[id_idx][topic_sizes[id_idx]] = score;
+
+                topic_sizes[id_idx]++;
             }
         }
     } // ID iterator
@@ -72,16 +77,25 @@ void update_total_scores(char *id, char *topic, int score)
         if (id_size > 0)
         {
             // Iterate through the last ID's topics and print them out
-            for (int topic_idx; topic_idx < topic_sizes[id_size]; topic_idx++)
+            int last_id = id_size - 1;
+            for (int topic_idx = 0; topic_idx < topic_sizes[last_id]; topic_idx++)
             {
-                int score = total_score[id_size][topic_idx];
+                int score = total_score[last_id][topic_idx];
 
-                printf("(%s, %s, %d)\n", ids[id_size], topics[id_size][topic_idx], score);
+                printf("(%s, %s, %d)\n", ids[last_id], topics[last_id][topic_idx], score);
             }
         }
 
         // Create it at the next available index.
-        ids[id_size++] = id;
+        ids[id_size] = id;
+
+        // Create the new topic.
+        topics[id_size][topic_sizes[id_size]++] = topic;
+        
+        // Finally, add the intial score for this new id
+        total_score[id_size][0] = score;
+
+        id_size++;
     }
 
 } // update_total_scores
