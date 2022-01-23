@@ -37,13 +37,15 @@ void mapper_proc(int pipein[2], int pipeout[2])
     close(pipeout[PIPE_R]);
 
     // Input from the text
-    if(dup2(pipein[PIPE_R], STDIN_FILENO) == -1) {
+    if (dup2(pipein[PIPE_R], STDIN_FILENO) == -1)
+    {
         printf("[child] ERROR dup2(): Couldn't redirect mapper stdin.\n");
         exit(EXIT_FAILURE);
     }
 
     // Output to the pipe to the reducer.
-    if(dup2(pipeout[PIPE_W], STDOUT_FILENO) == -1) {
+    if (dup2(pipeout[PIPE_W], STDOUT_FILENO) == -1)
+    {
         printf("[child] ERROR dup2(): Couldn't redirect mapper stdout.\n");
         exit(EXIT_FAILURE);
     }
@@ -64,7 +66,8 @@ void reducer_proc(int pipein[2])
     close(pipein[PIPE_W]);
 
     // Input from the pipe from the mapper.
-    if(dup2(pipein[PIPE_R], STDIN_FILENO) == -1) {
+    if (dup2(pipein[PIPE_R], STDIN_FILENO) == -1)
+    {
         printf("[child] ERROR dup2(): Couldn't redirect reducer stdin.\n");
         exit(EXIT_FAILURE);
     }
@@ -105,7 +108,7 @@ int main(void)
     printf("[combiner] text: %s\n", text);
 #endif
 
-    write(comb2map[PIPE_W], text, strlen(text)+1);
+    write(comb2map[PIPE_W], text, strlen(text) + 1);
 
 #if DEBUG
     printf("Starting mapper and reducer...\n");
@@ -147,9 +150,9 @@ int main(void)
             // Wait for both processes to finish.
             wait(&mapper_pid);
             wait(&reducer_pid);
-            #if DEBUG
+#if DEBUG
             printf("[combiner] Mapper and reducer finished.\n");
-            #endif
+#endif
         }
     }
 #if DEBUG

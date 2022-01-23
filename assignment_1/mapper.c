@@ -11,15 +11,16 @@
 char *read(void)
 {
     const int BUF_SIZE = 1500;
-    
+
     char *buffer = malloc(BUF_SIZE * sizeof *buffer);
     int index = 0;
-    
+
     int c;
-    while((c = fgetc(stdin)) != EOF) {
+    while ((c = fgetc(stdin)) != EOF)
+    {
         buffer[index++] = c;
     };
-    
+
     return buffer;
 }
 
@@ -58,7 +59,7 @@ int main(void)
 #if DEBUG
         printf("\"%s\", ", token);
 #endif
-        char * id;
+        char *id;
         char *action;
         char *topic;
 
@@ -82,14 +83,13 @@ int main(void)
             // Construct the entry
             entries[entries_size++] = (entry_t){id, action, topic};
 #if DEBUG
-            printf("\n\tentries[%d] = {%s, %s, %s}\n", entries_size-1, id, action, topic);
+            printf("\n\tentries[%d] = {%s, %s, %s}\n", entries_size - 1, id, action, topic);
 #endif
         }
 
         // Get next token
         token = strtok(NULL, delims);
     } // End of while
-
 
     // Print all the entries
 #if DEBUG
