@@ -4,7 +4,7 @@
 #include <string.h>
 #include <wait.h>
 
-#define DEBUG 1
+#define DEBUG 0
 
 #define PIPE_R 0
 #define PIPE_W 1
@@ -47,9 +47,9 @@ void mapper_proc(int pipein[2], int pipeout[2])
         printf("[child] ERROR dup2(): Couldn't redirect mapper stdout.\n");
         exit(EXIT_FAILURE);
     }
-
+#if DEBUG
     printf("[child] running mapper...\n");
-
+#endif
     // Run mapper
     // argv[0] is the process name (for ps)
     execl("./build/mapper", "./build/mapper", (char *)NULL);
@@ -68,9 +68,9 @@ void reducer_proc(int pipein[2])
         printf("[child] ERROR dup2(): Couldn't redirect reducer stdin.\n");
         exit(EXIT_FAILURE);
     }
-
+#if DEBUG
     printf("[child] running reducer...\n");
-
+#endif
     // Run reducer
     execl("./build/reducer", "./build/reducer", (char *)NULL);
 
@@ -107,8 +107,10 @@ int main(void)
 
     write(comb2map[PIPE_W], text, strlen(text)+1);
 
-    // free(text);
+#if DEBUG
     printf("Starting mapper and reducer...\n");
+#endif
+
     // Send text as the stdin
     pid_t mapper_pid, reducer_pid;
 
@@ -145,11 +147,13 @@ int main(void)
             // Wait for both processes to finish.
             wait(&mapper_pid);
             wait(&reducer_pid);
+            #if DEBUG
             printf("[combiner] Mapper and reducer finished.\n");
+            #endif
         }
     }
-
+#if DEBUG
     printf("[combiner] Done.\n");
-
+#endif
     return 0;
 }
