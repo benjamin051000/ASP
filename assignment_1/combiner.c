@@ -2,6 +2,9 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+#include <wait.h>
+
+#define DEBUG 1
 
 #define PIPE_R 0
 #define PIPE_W 1
@@ -27,30 +30,49 @@ char *readTextFile(void)
     return buffer;
 }
 
-void reducer_proc(pid_t pid, int pipein)
+void mapper_proc(int pipein[2], int pipeout[2])
 {
-    // Input from the pipe from the mapper.
-    dup2(STDIN_FILENO, pipein);
+    // Close unused pipes for this process.
+    close(pipein[PIPE_W]);
+    close(pipeout[PIPE_R]);
 
-    // Run reducer
-    char *args[] = {NULL};
-    execv("./build/reducer", args);
+    // Input from the text
+    if(dup2(pipein[PIPE_R], STDIN_FILENO) == -1) {
+        printf("[child] ERROR dup2(): Couldn't redirect mapper stdin.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    // Output to the pipe to the reducer.
+    if(dup2(pipeout[PIPE_W], STDOUT_FILENO) == -1) {
+        printf("[child] ERROR dup2(): Couldn't redirect mapper stdout.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("[child] running mapper...\n");
+
+    // Run mapper
+    // argv[0] is the process name (for ps)
+    execl("./build/mapper", "./build/mapper", (char *)NULL);
 
     printf("ERROR: Couldn't execute reducer.\n");
     exit(EXIT_FAILURE);
 }
 
-void mapper_proc(int pipein, int pipeout)
+void reducer_proc(int pipein[2])
 {
-    // Input from the text
-    dup2(STDIN_FILENO, pipein);
+    // Close unused pipes for this process.
+    close(pipein[PIPE_W]);
 
-    // Output to the pipe to the reducer.
-    dup2(STDOUT_FILENO, pipeout);
+    // Input from the pipe from the mapper.
+    if(dup2(pipein[PIPE_R], STDIN_FILENO) == -1) {
+        printf("[child] ERROR dup2(): Couldn't redirect reducer stdin.\n");
+        exit(EXIT_FAILURE);
+    }
 
-    // Run mapper
-    char *args[] = {NULL};
-    execv("./build/mapper", args);
+    printf("[child] running reducer...\n");
+
+    // Run reducer
+    execl("./build/reducer", "./build/reducer", (char *)NULL);
 
     printf("ERROR: Couldn't execute reducer.\n");
     exit(EXIT_FAILURE);
@@ -78,25 +100,56 @@ int main(void)
 
     // Read text input, and write it to the first pipe.
     char *text = readTextFile();
-    write(comb2map[PIPE_W], text, strlen(text));
-    free(text);
 
+#if DEBUG
+    printf("[combiner] text: %s\n", text);
+#endif
+
+    write(comb2map[PIPE_W], text, strlen(text)+1);
+
+    // free(text);
+    printf("Starting mapper and reducer...\n");
     // Send text as the stdin
-    pid_t result = fork();
+    pid_t mapper_pid, reducer_pid;
 
-    switch (result)
+    switch ((mapper_pid = fork()))
     {
     case -1:
         printf("ERROR: Couldn't fork() properly.\n");
         exit(EXIT_FAILURE);
 
     case 0: // Child process
-        mapper_proc(comb2map[PIPE_R], map2red[PIPE_W]);
+        mapper_proc(comb2map, map2red);
         break;
 
     default: // Parent process
-        reducer_proc(result, map2red[PIPE_R]);
+        // Close pipe for parent.
+        close(comb2map[PIPE_R]);
+        close(comb2map[PIPE_W]);
+
+        switch ((reducer_pid = fork()))
+        {
+        case -1:
+            printf("ERROR: Couldn't fork() properly.\n");
+            exit(EXIT_FAILURE);
+
+        case 0:
+            reducer_proc(map2red);
+            break;
+
+        default:
+            // Close pipes for parent.
+            close(map2red[PIPE_R]);
+            close(map2red[PIPE_W]);
+
+            // Wait for both processes to finish.
+            wait(&mapper_pid);
+            wait(&reducer_pid);
+            printf("[combiner] Mapper and reducer finished.\n");
+        }
     }
+
+    printf("[combiner] Done.\n");
 
     return 0;
 }
