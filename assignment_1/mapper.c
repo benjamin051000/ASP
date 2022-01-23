@@ -5,7 +5,7 @@
 #define DEBUG 0
 
 /**
- * @brief Read a text file into a buffer.
+ * @brief Read stdin into a buffer.
  * WARNING: You must free() the returned char*!
  */
 char *read(void)
@@ -82,7 +82,7 @@ int main(void)
             // Construct the entry
             entries[entries_size++] = (entry_t){id, action, topic};
 #if DEBUG
-            printf("\n\tentries[%d] = {%d, %s, %s}\n", entries_size-1, id, action, topic);
+            printf("\n\tentries[%d] = {%s, %s, %s}\n", entries_size-1, id, action, topic);
 #endif
         }
 
@@ -101,7 +101,7 @@ int main(void)
         entry_t *e = &entries[i];
 
 #if DEBUG
-        printf("Read entry {%d, %s, %s}\n", e->id, e->action, e->topic);
+        printf("Read entry {%s, %s, %s}\n", e->id, e->action, e->topic);
 #endif
 
         // Get cooresponding score from user action
