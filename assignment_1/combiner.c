@@ -9,6 +9,9 @@
 #define PIPE_R 0
 #define PIPE_W 1
 
+#define MAPPER_PATH "./mapper"
+#define REDUCER_PATH "./reducer"
+
 /**
  * @brief Read a text file into a buffer.
  * WARNING: You must free() the returned char*!
@@ -54,9 +57,9 @@ void mapper_proc(int pipein[2], int pipeout[2])
 #endif
     // Run mapper
     // argv[0] is the process name (for ps)
-    execl("./build/mapper", "./build/mapper", (char *)NULL);
+    execl(MAPPER_PATH, MAPPER_PATH, (char *)NULL);
 
-    printf("ERROR: Couldn't execute reducer.\n");
+    printf("ERROR: Couldn't execute mapper.\n");
     exit(EXIT_FAILURE);
 }
 
@@ -75,7 +78,7 @@ void reducer_proc(int pipein[2])
     printf("[child] running reducer...\n");
 #endif
     // Run reducer
-    execl("./build/reducer", "./build/reducer", (char *)NULL);
+    execl(REDUCER_PATH, REDUCER_PATH, (char *)NULL);
 
     printf("ERROR: Couldn't execute reducer.\n");
     exit(EXIT_FAILURE);
