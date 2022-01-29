@@ -9,8 +9,8 @@
 #define PIPE_R 0
 #define PIPE_W 1
 
-#define MAPPER_PATH "./mapper"
-#define REDUCER_PATH "./reducer"
+#define MAPPER_PATH "./build/mapper"
+#define REDUCER_PATH "./build/reducer"
 
 /**
  * @brief Read a text file into a buffer.
