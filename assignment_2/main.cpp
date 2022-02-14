@@ -14,10 +14,6 @@
 // For debugging purposes only.
 // #define DEBUG_MAPPER
 
-// Run synchronously (i.e., no multithreading).
-// mapper runs first, then reducer.
-// #define SYNC
-
 // Enable print debugging
 // #define DEBUG
 
@@ -43,7 +39,7 @@ std::ostream &operator<<(std::ostream &out, const mapper_out_data &o) {
 // Synchronization components //
 ////////////////////////////////
 // Mutex for queue pushes and pops
-pthread_mutex_t q_lock, cout_lock;
+pthread_mutex_t q_lock, cout_lock, total_scores_lock;
 std::queue<mapper_out_data> queue;
 // Condition variables for the queue
 bool q_full = false, q_empty = true;
@@ -54,6 +50,10 @@ pthread_cond_t q_full_cond, q_empty_cond;
 // empty, it's time to terminate. This does not need a mutex because only one
 // thread writes to it, mapper_worker.
 bool mapper_done = false;
+
+// Reducer workers do their work in this map.
+unordered_map<id_type, unordered_map<topic_type, score_type>> total_scores;
+
 
 /**
  * @brief Read a text file into a buffer.
@@ -175,14 +175,12 @@ void *mapper_worker(void *args) {
     return nullptr;
 }  // end of mapper
 
+
 /**
  * @brief reducer worked
  * @return void* (unused, void* is here for the pthread_create interface.)
  */
 void *reducer_worker(void *) {
-    static unordered_map<id_type, unordered_map<topic_type, score_type>>
-        total_scores;
-
     while (true) {
         pthread_mutex_lock(&q_lock);
 
@@ -224,30 +222,26 @@ void *reducer_worker(void *) {
         }
 
         pthread_mutex_unlock(&q_lock);
+        
+        // Increment score for each one.
+        pthread_mutex_lock(&total_scores_lock);
+        total_scores[data.id][data.topic] += data.score;
+        pthread_mutex_unlock(&total_scores_lock);
 
-        // auto &tot_score = total_scores[data.id][data.topic];
-        // tot_score += data.score;
 
-        pthread_mutex_lock(&cout_lock);
-        std::cout
 #ifdef DEBUG
-            << "[reducer " << pthread_self() << "] "
-#endif
-            << data << "\n";
-
-        // std::cout << "[reducer " << pthread_self()
-        //   << "] (" << data.id << ", " << data.topic << ", " << tot_score <<
-        //   ")\n";
+        pthread_mutex_lock(&cout_lock);
+        std::cout << "[reducer " << pthread_self() << "] " << data << "\n";
         pthread_mutex_unlock(&cout_lock);
-    }
+#endif
+    } // end of while(true)
+
     return nullptr;
 }
 
 int main(int argc, char *argv[]) {
-#ifndef SYNC
     pthread_mutex_init(&q_lock, NULL);
     pthread_mutex_init(&cout_lock, NULL);
-#endif
 
     if (argc != 3) {
         std::cout << "Usage: combiner <no. slots> <no. reducer threads>\n";
@@ -257,6 +251,11 @@ int main(int argc, char *argv[]) {
     // Get number of buffer slots & number of reducer workers from CLI args
     const size_t buf_size = std::stoi(argv[1]);
 
+    if(buf_size == 0) {
+        std::cout << "ERROR: buf_size must be a postitive integer.\n";
+        exit(EXIT_FAILURE);
+    }
+
     // Read text file
     const auto text = readTextFile();
 
@@ -264,8 +263,6 @@ int main(int argc, char *argv[]) {
         size_t buf_size;
         char *text;
     } mapper_args = {buf_size, text};
-
-#ifndef SYNC
 
     // Create mapper thread
     pthread_t mapper_thread;
@@ -290,17 +287,20 @@ int main(int argc, char *argv[]) {
     }
 #endif
 
-#else  // SYNC
-    std::cout << "SYNC MODE...\n";
-    mapper_worker(text);
-    reducer_worker(nullptr);
-#endif
+    // Finally, print the results.
+    for(auto& id_map: total_scores) {
+        const auto id = id_map.first;
+
+        for(auto& topic_map: id_map.second) {
+            const auto topic = topic_map.first;
+            const auto tot_score = topic_map.second;
+            std::cout << "(" << id << ", " << topic << ", " << tot_score << ")\n";
+        }
+    }
 
     // Destroy all resources used.
-#ifndef SYNC
     pthread_mutex_destroy(&q_lock);
     pthread_mutex_destroy(&cout_lock);
-#endif
     free(text);
 
     return 0;
