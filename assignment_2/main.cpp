@@ -10,12 +10,14 @@
 #include <cstdlib>
 #include <cstring>
 
-// Only create a mapper worker, remove all reducer workers.
-// For debugging purposes only.
-// #define DEBUG_MAPPER
-
 // Enable print debugging
 // #define DEBUG
+
+#ifdef DEBUG
+// Since threads will print various info, they need a mutex for cout.
+#define COUT_LOCK pthread_mutex_lock(&cout_lock);
+#define COUT_UNLOCK pthread_mutex_unlock(&cout_lock);
+#endif
 
 using std::unordered_map;
 using id_type = std::string;
@@ -30,8 +32,7 @@ struct mapper_out_data {
 
 // For debug-printing the map object.
 std::ostream &operator<<(std::ostream &out, const mapper_out_data &o) {
-    out << "(" << o.id << ", " << o.topic << ", " << o.score
-        << ")";
+    out << "(" << o.id << ", " << o.topic << ", " << o.score << ")";
     return out;
 }
 
@@ -45,6 +46,18 @@ std::queue<mapper_out_data> queue;
 bool q_full = false, q_empty = true;
 pthread_cond_t q_full_cond, q_empty_cond;
 
+void init_mutexes() {
+    pthread_mutex_init(&q_lock, NULL);
+    pthread_mutex_init(&cout_lock, NULL);
+    pthread_mutex_init(&total_scores_lock, NULL);
+}
+
+void destroy_mutexes() {
+    pthread_mutex_destroy(&q_lock);
+    pthread_mutex_destroy(&cout_lock);
+    pthread_mutex_destroy(&total_scores_lock);
+}
+
 // A global flag to tell reducer workers whether the mapper has finished
 // producing data. Once this flag turns true, reducers know once the queue is
 // empty, it's time to terminate. This does not need a mutex because only one
@@ -53,7 +66,6 @@ bool mapper_done = false;
 
 // Reducer workers do their work in this map.
 unordered_map<id_type, unordered_map<topic_type, score_type>> total_scores;
-
 
 /**
  * @brief Read a text file into a buffer.
@@ -92,7 +104,7 @@ void *mapper_worker(void *args) {
 
     int token_i = 0;
 
-    unordered_map<std::string, int> action_points {
+    unordered_map<std::string, int> action_points{
         {"P", 50}, {"L", 20}, {"D", -10}, {"C", 30}, {"S", 40}};
 
     char *token;
@@ -117,11 +129,11 @@ void *mapper_worker(void *args) {
             token_i++;
         } else {
             mapper_out_data m_data{id, token, score};
+
 #ifdef DEBUG
-            // Debug print
-            pthread_mutex_lock(&cout_lock);
-            std::cout << "[mapper] " << m_data << "\n";
-            pthread_mutex_unlock(&cout_lock);
+            COUT_LOCK
+            std::cout << "[m] " << m_data << "\n";
+            COUT_UNLOCK
 #endif
 
             // Push data into inter-thread queue
@@ -131,20 +143,21 @@ void *mapper_worker(void *args) {
             // full)
             while (q_full) {
 #ifdef DEBUG
-                pthread_mutex_lock(&cout_lock);
-                std::cout << "\033[33;1m[mapper] queue is full. Waiting for a "
+                COUT_LOCK
+                std::cout << "\033[33;1m[m] queue is full. Waiting for a "
                              "reducer "
                              "worker to alert us that it is no longer "
                              "full...\033[0m\n";
-                pthread_mutex_unlock(&cout_lock);
+                COUT_UNLOCK
 #endif
+
                 pthread_cond_wait(&q_full_cond, &q_lock);
             }
 
 #ifdef DEBUG
-            pthread_mutex_lock(&cout_lock);
-            std::cout << "\033[32;1m[mapper] queue is no longer full!\033[0m\n";
-            pthread_mutex_unlock(&cout_lock);
+            COUT_LOCK
+            std::cout << "\033[32;1m[m] queue is no longer full!\033[0m\n";
+            COUT_UNLOCK
 #endif
 
             // At this point, queue is not full.
@@ -166,7 +179,6 @@ void *mapper_worker(void *args) {
             token_i = 0;
         }
 
-        // token = strtok(NULL, delims);
     }  // end of while
 
     // No more tokens to parse. Alert reducer threads that the mapper has
@@ -174,7 +186,6 @@ void *mapper_worker(void *args) {
     mapper_done = true;
     return nullptr;
 }  // end of mapper
-
 
 /**
  * @brief reducer worked
@@ -194,19 +205,21 @@ void *reducer_worker(void *) {
         // Wait for queue to have elements (AKA wait for not empty)
         while (q_empty) {
 #ifdef DEBUG
-            pthread_mutex_lock(&cout_lock);
+            COUT_LOCK
             std::cout
-                << "\033[33;1m[reducer] queue is empty. Waiting for a mapper "
+                << "\033[33;1m[r " << pthread_self()
+                << "] queue is empty. Waiting for a mapper "
                    "worker to alert us that it is no longer empty...\033[0m\n";
-            pthread_mutex_unlock(&cout_lock);
+            COUT_UNLOCK
 #endif
             pthread_cond_wait(&q_empty_cond, &q_lock);
         }
 
 #ifdef DEBUG
-        pthread_mutex_lock(&cout_lock);
-        std::cout << "\033[32;1m[reducer] queue is no longer empty!\033[0m\n";
-        pthread_mutex_unlock(&cout_lock);
+        COUT_LOCK
+        std::cout << "\033[32;1m[r " << pthread_self()
+                  << "] queue is no longer empty!\033[0m\n";
+        COUT_UNLOCK
 #endif
 
         const auto data = queue.front();
@@ -220,38 +233,61 @@ void *reducer_worker(void *) {
         if (queue.empty()) {
             q_empty = true;
         }
-
         pthread_mutex_unlock(&q_lock);
-        
+
+#ifdef DEBUG
+        COUT_LOCK
+        std::cout << "[r " << pthread_self() << "] attempting to change id "
+                  << data.id << ", topic " << data.topic << "...\n";
+        COUT_UNLOCK
+#endif
         // Increment score for each one.
         pthread_mutex_lock(&total_scores_lock);
+
+#ifdef DEBUG
+        COUT_LOCK
+        std::cout << "[r " << pthread_self() << "] Acquired mutex.\n";
+        COUT_UNLOCK
+#endif
+
         total_scores[data.id][data.topic] += data.score;
         pthread_mutex_unlock(&total_scores_lock);
 
-
 #ifdef DEBUG
-        pthread_mutex_lock(&cout_lock);
-        std::cout << "[reducer " << pthread_self() << "] " << data << "\n";
-        pthread_mutex_unlock(&cout_lock);
+        COUT_LOCK
+        std::cout << "[r " << pthread_self() << "] released mutex. Done.\n";
+        COUT_UNLOCK
 #endif
-    } // end of while(true)
+
+        // #ifdef DEBUG
+        //         COUT_LOCK
+        //         std::cout << "[r " << pthread_self() << "] " << data << "\n";
+        //         COUT_UNLOCK
+        // #endif
+
+    }  // end of while(true)
 
     return nullptr;
 }
 
 int main(int argc, char *argv[]) {
-    pthread_mutex_init(&q_lock, NULL);
-    pthread_mutex_init(&cout_lock, NULL);
-
     if (argc != 3) {
         std::cout << "Usage: combiner <no. slots> <no. reducer threads>\n";
-        return -1;
+        exit(EXIT_FAILURE);
     }
+
+    init_mutexes();
 
     // Get number of buffer slots & number of reducer workers from CLI args
     const size_t buf_size = std::stoi(argv[1]);
+    const int num_reducer_workers = std::stoi(argv[2]);
 
-    if(buf_size == 0) {
+#ifdef DEBUG
+    std::cout << "CLI args: buf_size=" << buf_size
+              << ", num_reducer_workers=" << num_reducer_workers << "\n";
+#endif
+
+    if (buf_size == 0) {
         std::cout << "ERROR: buf_size must be a postitive integer.\n";
         exit(EXIT_FAILURE);
     }
@@ -264,43 +300,40 @@ int main(int argc, char *argv[]) {
         char *text;
     } mapper_args = {buf_size, text};
 
-    // Create mapper thread
+    // Create threads
     pthread_t mapper_thread;
+    pthread_t reducer_threads[num_reducer_workers];
+
     pthread_create(&mapper_thread, NULL, mapper_worker, &mapper_args);
-
-#ifndef DEBUG_MAPPER
-    // Create reducer threads
-    const int num_users = std::stoi(argv[2]);
-    pthread_t reducer_threads[num_users];
-
     for (auto &r_thread : reducer_threads) {
         pthread_create(&r_thread, NULL, reducer_worker, NULL);
     }
-#endif
 
     // Join threads
     pthread_join(mapper_thread, NULL);
-
-#ifndef DEBUG_MAPPER
     for (auto &r_thread : reducer_threads) {
         pthread_join(r_thread, NULL);
     }
+    // At this point, only this thread remains.
+
+#ifdef DEBUG
+    std::cout << "--------------------------------------------------\n";
 #endif
 
-    // Finally, print the results.
-    for(auto& id_map: total_scores) {
+    // Print final results
+    for (auto &id_map : total_scores) {
         const auto id = id_map.first;
 
-        for(auto& topic_map: id_map.second) {
+        for (auto &topic_map : id_map.second) {
             const auto topic = topic_map.first;
             const auto tot_score = topic_map.second;
-            std::cout << "(" << id << ", " << topic << ", " << tot_score << ")\n";
+            std::cout << "(" << id << ", " << topic << ", " << tot_score
+                      << ")\n";
         }
     }
 
     // Destroy all resources used.
-    pthread_mutex_destroy(&q_lock);
-    pthread_mutex_destroy(&cout_lock);
+    destroy_mutexes();
     free(text);
 
     return 0;
