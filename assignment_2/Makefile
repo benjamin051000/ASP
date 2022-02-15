@@ -1,5 +1,5 @@
 OUTPUT=build/
-FLAGS=-Wall -Wextra -pthread
+FLAGS=-Wall -Wextra -pthread -g
 
 # Build each executable into the output directory.
 build: main.cpp
@@ -11,7 +11,7 @@ run: build
 	$(OUTPUT)main 10 2 < input.txt
 
 test:
-	for i in {1..1000}; do echo $i; make run > /dev/null; done; echo $i tests completed.
+	for i in {1..1000}; do echo $i; make run; done; echo $i tests completed.
 
 # Delete the output directory.
 clean:
