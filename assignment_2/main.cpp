@@ -266,7 +266,9 @@ void *mapper_worker(void *args) {
     }  // end of while
 
 #ifdef DEBUG
-    COUT_SYNC("[m] Finished parsing all the tokens. Terminating...\n");
+    COUT_SYNC(
+        "\033[32;1m[m] Finished parsing all the tokens. "
+        "Terminating...\033[0m\n");
 #endif
 
     // No more tokens to parse. Alert reducer threads that the mapper has
@@ -312,6 +314,12 @@ void *reducer_worker(void *args) {
         // If mapper_done flag is asserted, and the queue is empty,
         // There is no more work to be done. Terminate this thread.
         if (mapper_done and m_conn.q_empty) {
+#ifdef DEBUG
+            COUT_SYNC("\033[32;1m[r "
+                      << pthread_self()
+                      << "] Mapper is done, and I have nothing left in "
+                         "my queue. I'm done!\033[0m\n")
+#endif
             pthread_mutex_unlock(&m_conn.q_lock);  // probably unnecessary
             break;
         }
@@ -329,8 +337,8 @@ void *reducer_worker(void *args) {
         }
 
 #ifdef DEBUG
-        COUT_SYNC("\033[32;1m[r " << pthread_self()
-                                  << "] queue is no longer empty\033[0m\n")
+        COUT_SYNC("[r " << pthread_self()
+                        << "] queue is currently not empty. Fetching data...\n")
 #endif
 
         const auto data = m_conn.q.front();
