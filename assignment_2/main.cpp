@@ -132,7 +132,7 @@ char *readTextFile(void) {
     return buffer;
 }
 
-/** 
+/**
  * @param args A struct containing a buffer size and a char* to the input text.
  */
 void *mapper_worker(void *args) {
@@ -178,7 +178,7 @@ void *mapper_worker(void *args) {
         mapped_data m_data{id, topic, score};
 
 #ifdef DEBUG
-        COUT_SYNC("[m] " << m_data << "\n")
+        COUT_SYNC("[m] parsed data: " << m_data << "\n")
 #endif
         // TODO check if we have added too many reducer threads and print a
         // warning or something?
@@ -191,18 +191,13 @@ void *mapper_worker(void *args) {
         if (thread_conns.find(id) == thread_conns.end()) {
             // It wasn't. Make one and add it to the map.
 
-#ifdef DEBUG
-            COUT_SYNC("[m] creating a new reducer.\n")
-#endif
-
-            // This reducer hasn't been spun up yet. Let's make a new one.
             thread_conns.emplace(id, ReducerConnection(id));
-            
+
             auto &r_con = thread_conns.at(id);
 
 #ifdef DEBUG
-            COUT_SYNC("[m] passing args to new reducer thread: " << r_con.id
-                                                                 << "\n")
+            COUT_SYNC("[m] creating a new reducer thread for ID \"" << r_con.id
+                                                                    << "\"\n")
 #endif
 
             pthread_t new_reducer_thread;
@@ -213,12 +208,17 @@ void *mapper_worker(void *args) {
             reducer_workers.push_back(new_reducer_thread);
 
             // Start the thread
-            pthread_create(&new_reducer_thread, NULL, reducer_worker, &r_con.id);
+            pthread_create(&new_reducer_thread, NULL, reducer_worker,
+                           &r_con.id);
         }  // end of if
 
         // Now, the reducer connection should be in the map. Get a reference
         // to it.
         auto &r_con = thread_conns.at(id);
+
+        // We should be able to do this here, because r_con points to a single
+        // part of thread_conns that has its own mutexes.
+        pthread_mutex_unlock(&thread_conns_lock);
 
         // Send data to the worker
         pthread_mutex_lock(&r_con.q_lock);
@@ -228,8 +228,8 @@ void *mapper_worker(void *args) {
         while (r_con.q_full) {
 #ifdef DEBUG
             COUT_SYNC(
-                "\033[33;1m[m] queue is full. Waiting for a reducer worker to "
-                "alert us that it is no longer full...\033[0m\n")
+                "[m] queue full. Waiting for reducer to consume some "
+                "elements...\n")
 #endif
 
             pthread_cond_wait(&r_con.q_full_cond, &r_con.q_lock);
@@ -258,9 +258,16 @@ void *mapper_worker(void *args) {
             r_con.q_full = true;
         }
 
-        pthread_mutex_unlock(&thread_conns_lock);
         pthread_mutex_unlock(&r_con.q_lock);
+
+#ifdef DEBUG
+        COUT_SYNC("[m] Done sending this tuple. Restarting...\n");
+#endif
     }  // end of while
+
+#ifdef DEBUG
+    COUT_SYNC("[m] Finished parsing all the tokens. Terminating...\n");
+#endif
 
     // No more tokens to parse. Alert reducer threads that the mapper has
     // finished.
@@ -283,8 +290,9 @@ void *reducer_worker(void *args) {
     // Get mapper connection data structures
     pthread_mutex_lock(&thread_conns_lock);
 
-    if(thread_conns.find(r_id) == thread_conns.end()) {
-        std::cerr << "Error: reducer can't find thread connection obj for id " << r_id << "\n";
+    if (thread_conns.find(r_id) == thread_conns.end()) {
+        std::cerr << "Error: reducer can't find thread connection obj for id "
+                  << r_id << "\n";
         exit(EXIT_FAILURE);
     }
 
@@ -292,7 +300,7 @@ void *reducer_worker(void *args) {
     auto &m_conn = thread_conns.at(r_id);
 
     pthread_mutex_unlock(&thread_conns_lock);
-    
+
 #ifdef DEBUG
     COUT_SYNC("[r " << pthread_self() << "] Starting for user id:" << m_conn.id
                     << "\n")
@@ -322,13 +330,13 @@ void *reducer_worker(void *args) {
 
 #ifdef DEBUG
         COUT_SYNC("\033[32;1m[r " << pthread_self()
-                                  << "] queue is no longer empty!\033[0m\n")
+                                  << "] queue is no longer empty\033[0m\n")
 #endif
 
         const auto data = m_conn.q.front();
         m_conn.q.pop();
 
-        // It's no longer full. Alert other threads.
+        // It's no longer full. Alert mapper.
         m_conn.q_full = false;
         pthread_cond_signal(&m_conn.q_full_cond);
 
@@ -345,15 +353,12 @@ void *reducer_worker(void *args) {
         // Increment score for each one.
         pthread_mutex_lock(&total_scores_lock);
 
-#ifdef DEBUG
-        COUT_SYNC("[r " << pthread_self() << "] Acquired mutex.\n")
-#endif
-
         total_scores[data.id][data.topic] += data.score;
         pthread_mutex_unlock(&total_scores_lock);
 
 #ifdef DEBUG
-        COUT_SYNC("[r " << pthread_self() << "] released mutex. Done.\n")
+        COUT_SYNC("[r " << pthread_self()
+                        << "] Updated total scores. Restarting...\n")
 #endif
 
     }  // end of while(true)
