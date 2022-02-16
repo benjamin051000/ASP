@@ -126,42 +126,45 @@ char *readTextFile(void) {
 
 /**
  * @brief Mapper worker
- * @param text (char*) string of input text
+ * @param args A struct containing a buffer size and a char* to the input text.
  */
 void *mapper_worker(void *args) {
     // Unpack args
     struct mapper_args_t {
         size_t buf_size;
         char *text;
-    } *mapper_args = (mapper_args_t *)args;
+    } &mapper_args = *static_cast<mapper_args_t *>(args);
 
-    auto text = mapper_args->text;
-    const auto buf_size = mapper_args->buf_size;
+    auto text = mapper_args.text;
+    const auto BUF_SIZE = mapper_args.buf_size;
 
     const auto delims = "(), \n";
 
-    int token_i = 0;
-
-    unordered_map<std::string, int> action_points{
+    /**
+     * Map that coorelates an action to its cooresponding point value.
+     */
+    const unordered_map<std::string, int> action_points {
         {"P", 50}, {"L", 20}, {"D", -10}, {"C", 30}, {"S", 40}};
 
-    char *token;
-    char *rest = static_cast<char *>(text);
 
-    std::string id;
-    int score;
+    // Make temp variables the tokenizer will use
+    char *token; // Substring of input text that represents a single token.
+    
+    char *rest = static_cast<char *>(text); // Used by strtok_r to preserve tokenizer state.
+    
+    std::string id; // Stores user ID 
+    int score; // Stores action's score
 
-    // WARNING: rest (AKA text) will be modified! If you
-    // need text preserved, use strdup to make a copy of it.
+    int token_i = 0; // Index used for token parsing state machine.
+
     while ((token = strtok_r(rest, delims, &rest))) {
-        // std::cout << "token: " << token << "\n";
         if (token_i == 0) {
             // This is the first of the three tuple entries, which is the ID.
             id = token;
             token_i++;
         } else if (token_i == 1) {
             // This is the second tuple entry, which is the category.
-            score = action_points[token];
+            score = action_points.at(token);
             token_i++;
         } else {
             mapper_out_data m_data{id, token, score};
@@ -179,7 +182,6 @@ void *mapper_worker(void *args) {
             try {
                 thread_conns.at(id);
             } catch (const std::out_of_range &) {
-
 #ifdef DEBUG
                 COUT_LOCK
                 std::cout << "[m] creating a new reducer.\n";
@@ -248,7 +250,7 @@ void *mapper_worker(void *args) {
             // - more efficient, probably less error-prone too
 
             // However, it may be full.
-            if (r_con.q.size() == buf_size) {
+            if (r_con.q.size() == BUF_SIZE) {
                 r_con.q_full = true;
             }
 
@@ -267,28 +269,24 @@ void *mapper_worker(void *args) {
 }  // end of mapper
 
 /**
- * @brief reducer worked
+ * @brief reducer worker
  * @return void* (unused, void* is here for the pthread create interface.)
  */
 void *reducer_worker(void *args) {
     // Get mapper connection from args
-    std::string &r_id = *static_cast<std::string*>(args);
+    std::string &r_id = *static_cast<std::string *>(args);
 
 #ifdef DEBUG
     COUT_LOCK
-    std::cout << "[r " << pthread_self()
-              << "] r_id = " << r_id << "\n";
+    std::cout << "[r " << pthread_self() << "] r_id = " << r_id << "\n";
     COUT_UNLOCK
 #endif
 
     // Get mapper connection data structures
     pthread_mutex_lock(&thread_conns_lock);
-    try
-    {
-        auto& m_conn = thread_conns.at(r_id); // segfault (TODO prob need mutex on red_conns)
-    }
-    catch(const std::out_of_range& e)
-    {
+    try {
+        thread_conns.at(r_id);  // segfault (TODO prob need mutex on red_conns)
+    } catch (const std::out_of_range &e) {
 #ifdef DEBUG
         COUT_LOCK
         std::cerr << e.what() << '\n';
@@ -299,7 +297,7 @@ void *reducer_worker(void *args) {
     pthread_mutex_unlock(&thread_conns_lock);
 
     // Since it passed the try
-    auto& m_conn = thread_conns.at(r_id);
+    auto &m_conn = thread_conns.at(r_id);
 
 #ifdef DEBUG
     COUT_LOCK
@@ -387,51 +385,64 @@ void *reducer_worker(void *args) {
 }
 
 int main(int argc, char *argv[]) {
+    // Ensure user input 2 CLI args
     if (argc != 3) {
         std::cout << "Usage: combiner <no. slots> <no. reducer threads>\n";
         exit(EXIT_FAILURE);
     }
 
-    // init_mutexes();
-
     // Get number of buffer slots & number of reducer workers from CLI args
     const size_t BUF_SIZE = std::stoi(argv[1]);
     const int NUM_USERS = std::stoi(argv[2]);
 
-#ifdef DEBUG
-    std::cout << "CLI args: BUF_SIZE=" << BUF_SIZE
-              << ", NUM_USERS=" << NUM_USERS << "\n";
-
-    pthread_mutex_init(&cout_lock, NULL);
-#endif
-    pthread_mutex_init(&total_scores_lock, NULL);
-    pthread_mutex_init(&thread_conns_lock, NULL);
-
-
+    // Ensure valid CLI args
     if (BUF_SIZE == 0) {
         std::cout << "ERROR: BUF_SIZE must be a postitive integer.\n";
         exit(EXIT_FAILURE);
     }
 
+    if (NUM_USERS < 1) {
+        std::cout << "ERROR: NUM_USERS must be at least 1.\n";
+        exit(EXIT_FAILURE);
+    }
+
+#ifdef DEBUG
+    // Print CLI args
+    std::cout << "Args: buffer size =" << BUF_SIZE
+              << ", number of user threads =" << NUM_USERS << "\n";
+#endif
+
+    // Iniitalize mutexes
+    pthread_mutex_init(&total_scores_lock, NULL);
+    pthread_mutex_init(&thread_conns_lock, NULL);
+
+#ifdef DEBUG
+    pthread_mutex_init(&cout_lock, NULL);
+#endif
+
     // Read text file
     const auto text = readTextFile();
 
+    // Struct to send text + BUF_SIZE to mapper thread
     struct {
         size_t buf_size;
         char *text;
     } mapper_args = {BUF_SIZE, text};
 
-    // Create mapper thread (reducers will be created dynamically by mapper)
+    // Create mapper thread
+    // (reducers will be created dynamically by mapper)
     pthread_t mapper_thread;
 
     pthread_create(&mapper_thread, NULL, mapper_worker, &mapper_args);
 
     // Join threads
     pthread_join(mapper_thread, NULL);
+
     for (auto &r_thread : reducer_workers) {
         pthread_join(r_thread, NULL);
     }
-    // At this point, only this thread remains.
+
+    // At this point, only the main thread remains.
 
 #ifdef DEBUG
     std::cout << "--------------------------------------------------\n";
@@ -453,9 +464,17 @@ int main(int argc, char *argv[]) {
 #ifdef DEBUG
     pthread_mutex_destroy(&cout_lock);
 #endif
+
+    // Destroy mutexes
     pthread_mutex_destroy(&total_scores_lock);
     pthread_mutex_destroy(&thread_conns_lock);
+
+    // Free input text
     free(text);
+
+#ifdef DEBUG
+    std::cout << "Goodbye.\n";
+#endif
 
     return 0;
 }
