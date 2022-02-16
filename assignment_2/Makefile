@@ -10,9 +10,6 @@ build: main.cpp
 run: build
 	$(OUTPUT)main 10 7 < input.txt
 
-test:
-	for i in {1..1000}; do echo $i; make run; done; echo $i tests completed.
-
 # Delete the output directory.
 clean:
 	rm -r $(OUTPUT)
