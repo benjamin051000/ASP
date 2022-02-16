@@ -183,9 +183,10 @@ void *mapper_worker(void *args) {
 
         // Time to push the data to the appropriate reducer thread.
         // First, get the struct with IPC stuff
-        try {
-            thread_conns.at(id);
-        } catch (const std::out_of_range &) {
+
+        // Test to see if the element exists in the map.
+        if (thread_conns.find(id) == thread_conns.end()) {
+            // It wasn't. Make one and add it to the map.
 #ifdef DEBUG
             COUT_LOCK
             std::cout << "[m] creating a new reducer.\n";
@@ -195,8 +196,7 @@ void *mapper_worker(void *args) {
             // This reducer hasn't been spun up yet. Let's make a new one.
             thread_conns[id] = ReducerConnection(id);
 
-            auto &args = thread_conns.at(
-                id);  // TODO just pass id to reducer, it can get args there
+            auto &args = thread_conns.at(id);
 #ifdef DEBUG
             COUT_LOCK
             std::cout << "[m] passing args to new reducer thread: " << args.id
@@ -207,10 +207,10 @@ void *mapper_worker(void *args) {
             pthread_t temp;
             pthread_create(&temp, NULL, reducer_worker, &args.id);
 
-            // Save this pthread id in the global vector to be joined by the
-            // main thread later.
+            // Save this pthread id in the global vector 
+            // to be joined by the main thread later.
             reducer_workers.push_back(temp);
-        }
+        }  // end of if
 
         // Now, the reducer connection should be in the map. Get a reference
         // to it.
