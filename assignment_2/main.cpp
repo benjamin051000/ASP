@@ -13,6 +13,7 @@
 // Enable print debugging
 #define DEBUG
 
+// Helpful debug stuff
 #ifdef DEBUG
 // Since threads will print various info, they need a mutex for cout.
 #define COUT_LOCK pthread_mutex_lock(&cout_lock);
@@ -28,13 +29,20 @@ pthread_mutex_t cout_lock;
 #endif
 
 // Type aliases
-
+using std::string;
 using std::unordered_map;
-using id_type = std::string;
-using topic_type = std::string;
+
+using id_type = string;
+using topic_type = string;
 using score_type = int;
 
-// Simple struct to hold output from the mapper.
+// Struct to hold arguments passed from main to mapper worker thread.
+struct mapper_args_t {
+    size_t buf_size;
+    char *text;
+};
+
+// Struct to hold output from the mapper.
 struct mapped_data {
     id_type id;
     topic_type topic;
@@ -66,11 +74,10 @@ struct ReducerConnection {
     bool q_full = false;
     bool q_empty = true;
 
-    /**
-     * Default constructor (should not be called)
-     */
-    ReducerConnection() { ReducerConnection("UNINITIALIZED"); }
+    // Default constructor (should not be called)
+    ReducerConnection() {}
 
+    // Use this constructor instead
     ReducerConnection(const id_type id) : id(id) {
         pthread_mutex_init(&q_lock, NULL);
         pthread_cond_init(&q_empty_cond, NULL);
@@ -90,6 +97,8 @@ struct ReducerConnection {
  */
 unordered_map<id_type, ReducerConnection> thread_conns;
 pthread_mutex_t thread_conns_lock;
+
+// Vector of pthread IDs (for joining)
 std::vector<pthread_t> reducer_workers;
 
 // Reducer workers do their work in this map.
@@ -123,15 +132,12 @@ char *readTextFile(void) {
     return buffer;
 }
 
-/**
+/** 
  * @param args A struct containing a buffer size and a char* to the input text.
  */
 void *mapper_worker(void *args) {
     // Unpack args
-    struct mapper_args_t {
-        size_t buf_size;
-        char *text;
-    } &mapper_args = *static_cast<mapper_args_t *>(args);
+    mapper_args_t &mapper_args = *static_cast<mapper_args_t *>(args);
 
     auto text = mapper_args.text;
     const auto BUF_SIZE = mapper_args.buf_size;
@@ -139,7 +145,7 @@ void *mapper_worker(void *args) {
     const auto delims = "(), \n";
 
     // Map that coorelates an action to its cooresponding point value.
-    const unordered_map<std::string, int> action_points{
+    const unordered_map<string, int> action_points{
         {"P", 50}, {"L", 20}, {"D", -10}, {"C", 30}, {"S", 40}};
 
     // Make temp variables the tokenizer will use
@@ -181,6 +187,7 @@ void *mapper_worker(void *args) {
         // First, get the struct with IPC stuff
 
         // Test to see if the element exists in the map.
+        pthread_mutex_lock(&thread_conns_lock);
         if (thread_conns.find(id) == thread_conns.end()) {
             // It wasn't. Make one and add it to the map.
 
@@ -189,28 +196,31 @@ void *mapper_worker(void *args) {
 #endif
 
             // This reducer hasn't been spun up yet. Let's make a new one.
-            thread_conns[id] = ReducerConnection(id);
-
-            auto &args = thread_conns.at(id);
+            thread_conns.emplace(id, ReducerConnection(id));
+            
+            auto &r_con = thread_conns.at(id);
 
 #ifdef DEBUG
-            COUT_SYNC("[m] passing args to new reducer thread: " << args.id
+            COUT_SYNC("[m] passing args to new reducer thread: " << r_con.id
                                                                  << "\n")
 #endif
 
-            pthread_t temp;
-            pthread_create(&temp, NULL, reducer_worker, &args.id);
+            pthread_t new_reducer_thread;
 
-            // Save this pthread id in the global vector
-            // to be joined by the main thread later.
-            reducer_workers.push_back(temp);
+            // Save this pthread in the global vector.
+            // This should be ok because pthread_t is a primitive type.
+            // TODO verify this
+            reducer_workers.push_back(new_reducer_thread);
+
+            // Start the thread
+            pthread_create(&new_reducer_thread, NULL, reducer_worker, &r_con.id);
         }  // end of if
 
         // Now, the reducer connection should be in the map. Get a reference
         // to it.
         auto &r_con = thread_conns.at(id);
 
-        // Push data into inter-thread queue
+        // Send data to the worker
         pthread_mutex_lock(&r_con.q_lock);
 
         // Wait for queue to have room to push a new one (AKA wait for not
@@ -225,11 +235,12 @@ void *mapper_worker(void *args) {
             pthread_cond_wait(&r_con.q_full_cond, &r_con.q_lock);
         }
 
+        // At this point, queue is not full.
+
 #ifdef DEBUG
-        COUT_SYNC("[m] queue is no longer full!\n")
+        COUT_SYNC("[m] queue is currently not full. Sending data...\n")
 #endif
 
-        // At this point, queue is not full.
         r_con.q.push(m_data);
 
         // Now that we've pushed a new item, tell other
@@ -247,12 +258,8 @@ void *mapper_worker(void *args) {
             r_con.q_full = true;
         }
 
+        pthread_mutex_unlock(&thread_conns_lock);
         pthread_mutex_unlock(&r_con.q_lock);
-
-        // Reset token index for next round.
-        // token_i = 0;
-        // }
-
     }  // end of while
 
     // No more tokens to parse. Alert reducer threads that the mapper has
@@ -267,7 +274,7 @@ void *mapper_worker(void *args) {
  */
 void *reducer_worker(void *args) {
     // Get mapper connection from args
-    std::string &r_id = *static_cast<std::string *>(args);
+    string &r_id = *static_cast<string *>(args);
 
 #ifdef DEBUG
     COUT_SYNC("[r " << pthread_self() << "] r_id = " << r_id << "\n")
@@ -275,22 +282,17 @@ void *reducer_worker(void *args) {
 
     // Get mapper connection data structures
     pthread_mutex_lock(&thread_conns_lock);
-    try {
-        thread_conns.at(r_id);  // segfault (TODO prob need mutex on red_conns)
-                                // TODO replace with if stmt
-    } catch (const std::out_of_range &e) {
-#ifdef DEBUG
-        COUT_LOCK
-        std::cerr << e.what() << '\n';
-        COUT_UNLOCK
-        throw std::out_of_range(e);
-#endif
-    }
-    pthread_mutex_unlock(&thread_conns_lock);
 
-    // Since it passed the try
+    if(thread_conns.find(r_id) == thread_conns.end()) {
+        std::cerr << "Error: reducer can't find thread connection obj for id " << r_id << "\n";
+        exit(EXIT_FAILURE);
+    }
+
+    // We were able to find it, so grab it.
     auto &m_conn = thread_conns.at(r_id);
 
+    pthread_mutex_unlock(&thread_conns_lock);
+    
 #ifdef DEBUG
     COUT_SYNC("[r " << pthread_self() << "] Starting for user id:" << m_conn.id
                     << "\n")
@@ -399,10 +401,7 @@ int main(int argc, char *argv[]) {
     const auto text = readTextFile();
 
     // Struct to send text + BUF_SIZE to mapper thread
-    struct {
-        size_t buf_size;
-        char *text;
-    } mapper_args = {BUF_SIZE, text};
+    mapper_args_t mapper_args = {BUF_SIZE, text};
 
     // Create mapper thread
     // (reducers will be created dynamically by mapper)
