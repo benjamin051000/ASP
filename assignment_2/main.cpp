@@ -11,7 +11,7 @@
 #include <vector>
 
 // Enable print debugging
-#define DEBUG
+// #define DEBUG
 
 // Helpful debug stuff
 #ifdef DEBUG
@@ -19,10 +19,10 @@
 #define COUT_LOCK pthread_mutex_lock(&cout_lock);
 #define COUT_UNLOCK pthread_mutex_unlock(&cout_lock);
 
-#define COUT_SYNC(stuff) \
-    COUT_LOCK;           \
-    std::cout << stuff;  \
-    COUT_UNLOCK;
+#define COUT_SYNC(stuff)              \
+    COUT_LOCK                         \
+    std::cout << stuff << std::flush; \
+    COUT_UNLOCK
 
 // Lock to synchronize thread cout
 pthread_mutex_t cout_lock;
@@ -228,8 +228,8 @@ void *mapper_worker(void *args) {
         while (r_con.q_full) {
 #ifdef DEBUG
             COUT_SYNC(
-                "[m] queue full. Waiting for reducer to consume some "
-                "elements...\n")
+                "\033[33;1m[m] queue full. Waiting for reducer to consume some "
+                "elements...\033[0m\n")
 #endif
 
             pthread_cond_wait(&r_con.q_full_cond, &r_con.q_lock);
@@ -261,19 +261,35 @@ void *mapper_worker(void *args) {
         pthread_mutex_unlock(&r_con.q_lock);
 
 #ifdef DEBUG
-        COUT_SYNC("[m] Done sending this tuple. Restarting...\n");
+        COUT_SYNC("[m] Done sending this tuple. Restarting...\n")
 #endif
     }  // end of while
 
 #ifdef DEBUG
     COUT_SYNC(
         "\033[32;1m[m] Finished parsing all the tokens. "
-        "Terminating...\033[0m\n");
+        "Terminating...\033[0m\n")
 #endif
 
     // No more tokens to parse. Alert reducer threads that the mapper has
     // finished.
     mapper_done = true;
+
+    // One problem: Some reducers may be waiting for the queue to fill up.
+    // They need to be released.
+
+#ifdef DEBUG
+    COUT_SYNC(
+        "Signaling to any stalled threads that it's no longer empty...\n");
+#endif
+
+    pthread_mutex_lock(&thread_conns_lock);
+
+    for (auto &thread_conn : thread_conns) {
+        pthread_cond_signal(&thread_conn.second.q_empty_cond);
+    }
+    pthread_mutex_unlock(&thread_conns_lock);
+
     return nullptr;
 }  // end of mapper
 
@@ -321,7 +337,7 @@ void *reducer_worker(void *args) {
                          "my queue. I'm done!\033[0m\n")
 #endif
             pthread_mutex_unlock(&m_conn.q_lock);  // probably unnecessary
-            break;
+            return nullptr;
         }
 
         // Wait for queue to have elements (AKA wait for not empty)
@@ -334,6 +350,23 @@ void *reducer_worker(void *args) {
                    "worker to alert us that it is no longer empty...\033[0m\n")
 #endif
             pthread_cond_wait(&m_conn.q_empty_cond, &m_conn.q_lock);
+
+            if (mapper_done) {
+                // The mapper must have signaled just before it terminated.
+                // Otherwise, the previous mapper_done clause would have
+                // Terminated this thread. That means the mapper finished
+                // this thread's ID while it was waiting, and this thread
+                // can safely terminate.
+#ifdef DEBUG
+                COUT_SYNC("\033[32;1m[r "
+                          << pthread_self()
+                          << "] mapper finished while I was waiting for new "
+                             "data. I'm terminating.\033[0m\n")
+#endif
+
+                pthread_mutex_unlock(&m_conn.q_lock);  // probably unnecessary
+                return nullptr;
+            }
         }
 
 #ifdef DEBUG
@@ -425,9 +458,17 @@ int main(int argc, char *argv[]) {
     // Join threads
     pthread_join(mapper_thread, NULL);
 
+#ifdef DEBUG
+    COUT_SYNC("[main] mapper joined. Joining reducers...\n");
+#endif
+
     for (auto &r_thread : reducer_workers) {
         pthread_join(r_thread, NULL);
     }
+
+#ifdef DEBUG
+    COUT_SYNC("[main] All reducers joined.\n");
+#endif
 
     // At this point, only the main thread remains.
 
@@ -458,10 +499,6 @@ int main(int argc, char *argv[]) {
 
     // Free input text
     free(text);
-
-#ifdef DEBUG
-    std::cout << "Goodbye.\n";
-#endif
 
     return 0;
 }
