@@ -18,22 +18,31 @@
 #define COUT_LOCK pthread_mutex_lock(&cout_lock);
 #define COUT_UNLOCK pthread_mutex_unlock(&cout_lock);
 
+#define COUT_SYNC(stuff) \
+    COUT_LOCK;           \
+    std::cout << stuff;  \
+    COUT_UNLOCK;
+
+// Lock to synchronize thread cout
 pthread_mutex_t cout_lock;
 #endif
+
+// Type aliases
 
 using std::unordered_map;
 using id_type = std::string;
 using topic_type = std::string;
 using score_type = int;
 
-struct mapper_out_data {
+// Simple struct to hold output from the mapper.
+struct mapped_data {
     id_type id;
     topic_type topic;
     score_type score;
 };
 
 // For debug-printing the map object.
-std::ostream &operator<<(std::ostream &out, const mapper_out_data &o) {
+std::ostream &operator<<(std::ostream &out, const mapped_data &o) {
     out << "(" << o.id << ", " << o.topic << ", " << o.score << ")";
     return out;
 }
@@ -51,7 +60,7 @@ std::ostream &operator<<(std::ostream &out, const mapper_out_data &o) {
  */
 struct ReducerConnection {
     id_type id;
-    std::queue<mapper_out_data> q;
+    std::queue<mapped_data> q;
     pthread_mutex_t q_lock;
     pthread_cond_t q_full_cond, q_empty_cond;
     bool q_full = false;
@@ -83,17 +92,9 @@ unordered_map<id_type, ReducerConnection> thread_conns;
 pthread_mutex_t thread_conns_lock;
 std::vector<pthread_t> reducer_workers;
 
-void *reducer_worker(void *args);
-
-////////////////////////////////
-// Synchronization components //
-////////////////////////////////
-// Mutex for queue pushes and pops
-// pthread_mutex_t q_lock, cout_lock, total_scores_lock;
-// std::queue<mapper_out_data> queue;
-// Condition variables for the queue
-// bool q_full = false, q_empty = true;
-// pthread_cond_t q_full_cond, q_empty_cond;
+// Reducer workers do their work in this map.
+unordered_map<id_type, unordered_map<topic_type, score_type>> total_scores;
+pthread_mutex_t total_scores_lock;
 
 // A global flag to tell reducer workers whether the mapper has finished
 // producing data. Once this flag turns true, reducers know once the queue is
@@ -101,9 +102,7 @@ void *reducer_worker(void *args);
 // thread writes to it, mapper_worker.
 bool mapper_done = false;
 
-// Reducer workers do their work in this map.
-unordered_map<id_type, unordered_map<topic_type, score_type>> total_scores;
-pthread_mutex_t total_scores_lock;
+void *reducer_worker(void *args);
 
 /**
  * @brief Read a text file into a buffer.
@@ -125,7 +124,6 @@ char *readTextFile(void) {
 }
 
 /**
- * @brief Mapper worker
  * @param args A struct containing a buffer size and a char* to the input text.
  */
 void *mapper_worker(void *args) {
@@ -171,12 +169,10 @@ void *mapper_worker(void *args) {
         const auto topic = token;
 
         // All the tokens are collected! Construct the mapped tuple object.
-        mapper_out_data m_data{id, topic, score};
+        mapped_data m_data{id, topic, score};
 
 #ifdef DEBUG
-        COUT_LOCK
-        std::cout << "[m] " << m_data << "\n";
-        COUT_UNLOCK
+        COUT_SYNC("[m] " << m_data << "\n")
 #endif
         // TODO check if we have added too many reducer threads and print a
         // warning or something?
@@ -187,27 +183,25 @@ void *mapper_worker(void *args) {
         // Test to see if the element exists in the map.
         if (thread_conns.find(id) == thread_conns.end()) {
             // It wasn't. Make one and add it to the map.
+
 #ifdef DEBUG
-            COUT_LOCK
-            std::cout << "[m] creating a new reducer.\n";
-            COUT_UNLOCK
+            COUT_SYNC("[m] creating a new reducer.\n")
 #endif
 
             // This reducer hasn't been spun up yet. Let's make a new one.
             thread_conns[id] = ReducerConnection(id);
 
             auto &args = thread_conns.at(id);
+
 #ifdef DEBUG
-            COUT_LOCK
-            std::cout << "[m] passing args to new reducer thread: " << args.id
-                      << "\n";
-            COUT_UNLOCK
+            COUT_SYNC("[m] passing args to new reducer thread: " << args.id
+                                                                 << "\n")
 #endif
 
             pthread_t temp;
             pthread_create(&temp, NULL, reducer_worker, &args.id);
 
-            // Save this pthread id in the global vector 
+            // Save this pthread id in the global vector
             // to be joined by the main thread later.
             reducer_workers.push_back(temp);
         }  // end of if
@@ -223,21 +217,16 @@ void *mapper_worker(void *args) {
         // full)
         while (r_con.q_full) {
 #ifdef DEBUG
-            COUT_LOCK
-            std::cout << "\033[33;1m[m] queue is full. Waiting for a "
-                         "reducer "
-                         "worker to alert us that it is no longer "
-                         "full...\033[0m\n";
-            COUT_UNLOCK
+            COUT_SYNC(
+                "\033[33;1m[m] queue is full. Waiting for a reducer worker to "
+                "alert us that it is no longer full...\033[0m\n")
 #endif
 
             pthread_cond_wait(&r_con.q_full_cond, &r_con.q_lock);
         }
 
 #ifdef DEBUG
-        COUT_LOCK
-        std::cout << "[m] queue is no longer full!\n";
-        COUT_UNLOCK
+        COUT_SYNC("[m] queue is no longer full!\n")
 #endif
 
         // At this point, queue is not full.
@@ -281,15 +270,14 @@ void *reducer_worker(void *args) {
     std::string &r_id = *static_cast<std::string *>(args);
 
 #ifdef DEBUG
-    COUT_LOCK
-    std::cout << "[r " << pthread_self() << "] r_id = " << r_id << "\n";
-    COUT_UNLOCK
+    COUT_SYNC("[r " << pthread_self() << "] r_id = " << r_id << "\n")
 #endif
 
     // Get mapper connection data structures
     pthread_mutex_lock(&thread_conns_lock);
     try {
         thread_conns.at(r_id);  // segfault (TODO prob need mutex on red_conns)
+                                // TODO replace with if stmt
     } catch (const std::out_of_range &e) {
 #ifdef DEBUG
         COUT_LOCK
@@ -304,10 +292,8 @@ void *reducer_worker(void *args) {
     auto &m_conn = thread_conns.at(r_id);
 
 #ifdef DEBUG
-    COUT_LOCK
-    std::cout << "[r " << pthread_self()
-              << "] Starting for user id:" << m_conn.id << "\n";
-    COUT_UNLOCK
+    COUT_SYNC("[r " << pthread_self() << "] Starting for user id:" << m_conn.id
+                    << "\n")
 #endif
 
     while (true) {
@@ -323,21 +309,18 @@ void *reducer_worker(void *args) {
         // Wait for queue to have elements (AKA wait for not empty)
         while (m_conn.q_empty) {
 #ifdef DEBUG
-            COUT_LOCK
-            std::cout
-                << "\033[33;1m[r " << pthread_self()
+            COUT_SYNC(
+                "\033[33;1m[r "
+                << pthread_self()
                 << "] queue is empty. Waiting for a mapper "
-                   "worker to alert us that it is no longer empty...\033[0m\n";
-            COUT_UNLOCK
+                   "worker to alert us that it is no longer empty...\033[0m\n")
 #endif
             pthread_cond_wait(&m_conn.q_empty_cond, &m_conn.q_lock);
         }
 
 #ifdef DEBUG
-        COUT_LOCK
-        std::cout << "\033[32;1m[r " << pthread_self()
-                  << "] queue is no longer empty!\033[0m\n";
-        COUT_UNLOCK
+        COUT_SYNC("\033[32;1m[r " << pthread_self()
+                                  << "] queue is no longer empty!\033[0m\n")
 #endif
 
         const auto data = m_conn.q.front();
@@ -354,34 +337,22 @@ void *reducer_worker(void *args) {
         pthread_mutex_unlock(&m_conn.q_lock);
 
 #ifdef DEBUG
-        COUT_LOCK
-        std::cout << "[r " << pthread_self() << "] attempting to change id "
-                  << data.id << ", topic " << data.topic << "...\n";
-        COUT_UNLOCK
+        COUT_SYNC("[r " << pthread_self() << "] attempting to change id "
+                        << data.id << ", topic " << data.topic << "...\n")
 #endif
         // Increment score for each one.
         pthread_mutex_lock(&total_scores_lock);
 
 #ifdef DEBUG
-        COUT_LOCK
-        std::cout << "[r " << pthread_self() << "] Acquired mutex.\n";
-        COUT_UNLOCK
+        COUT_SYNC("[r " << pthread_self() << "] Acquired mutex.\n")
 #endif
 
         total_scores[data.id][data.topic] += data.score;
         pthread_mutex_unlock(&total_scores_lock);
 
 #ifdef DEBUG
-        COUT_LOCK
-        std::cout << "[r " << pthread_self() << "] released mutex. Done.\n";
-        COUT_UNLOCK
+        COUT_SYNC("[r " << pthread_self() << "] released mutex. Done.\n")
 #endif
-
-        // #ifdef DEBUG
-        //         COUT_LOCK
-        //         std::cout << "[r " << pthread_self() << "] " << data << "\n";
-        //         COUT_UNLOCK
-        // #endif
 
     }  // end of while(true)
 
