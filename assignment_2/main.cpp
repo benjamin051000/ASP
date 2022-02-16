@@ -49,11 +49,13 @@ struct mapped_data {
     score_type score;
 };
 
+#ifdef DEBUG
 // For debug-printing the map object.
 std::ostream &operator<<(std::ostream &out, const mapped_data &o) {
     out << "(" << o.id << ", " << o.topic << ", " << o.score << ")";
     return out;
 }
+#endif
 
 /**
  * Connection from the mapper worker to
