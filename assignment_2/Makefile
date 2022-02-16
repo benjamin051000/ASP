@@ -8,7 +8,7 @@ build: main.cpp
 
 # Run the programs as defined in run.sh. Ensure they are built, first.
 run: build
-	$(OUTPUT)main 10 2 < input.txt
+	$(OUTPUT)main 10 7 < input.txt
 
 test:
 	for i in {1..1000}; do echo $i; make run; done; echo $i tests completed.
