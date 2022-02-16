@@ -140,125 +140,129 @@ void *mapper_worker(void *args) {
 
     const auto delims = "(), \n";
 
-    /**
-     * Map that coorelates an action to its cooresponding point value.
-     */
-    const unordered_map<std::string, int> action_points {
+    // Map that coorelates an action to its cooresponding point value.
+    const unordered_map<std::string, int> action_points{
         {"P", 50}, {"L", 20}, {"D", -10}, {"C", 30}, {"S", 40}};
 
-
     // Make temp variables the tokenizer will use
-    char *token; // Substring of input text that represents a single token.
-    
-    char *rest = static_cast<char *>(text); // Used by strtok_r to preserve tokenizer state.
-    
-    std::string id; // Stores user ID 
-    int score; // Stores action's score
+    char *token;  // Substring of input text that represents a single token.
 
-    int token_i = 0; // Index used for token parsing state machine.
+    // Used by strtok_r to preserve tokenizer state.
+    char *rest = static_cast<char *>(text);
 
+    // Get each token from the string.
     while ((token = strtok_r(rest, delims, &rest))) {
-        if (token_i == 0) {
-            // This is the first of the three tuple entries, which is the ID.
-            id = token;
-            token_i++;
-        } else if (token_i == 1) {
-            // This is the second tuple entry, which is the category.
-            score = action_points.at(token);
-            token_i++;
-        } else {
-            mapper_out_data m_data{id, token, score};
+        const auto id = token;  // First token, the user ID.
 
-#ifdef DEBUG
-            COUT_LOCK
-            std::cout << "[m] " << m_data << "\n";
-            COUT_UNLOCK
-#endif
-            // TODO check if we have added too many reducer threads and print a
-            // warning or something?
-
-            // Time to push the data to the appropriate reducer thread.
-            // First, get the struct with IPC stuff
-            try {
-                thread_conns.at(id);
-            } catch (const std::out_of_range &) {
-#ifdef DEBUG
-                COUT_LOCK
-                std::cout << "[m] creating a new reducer.\n";
-                COUT_UNLOCK
-#endif
-
-                // This reducer hasn't been spun up yet. Let's make a new one.
-                thread_conns[id] = ReducerConnection(id);
-
-                auto &args = thread_conns.at(
-                    id);  // TODO just pass id to reducer, it can get args there
-#ifdef DEBUG
-                COUT_LOCK
-                std::cout << "[m] passing args to new reducer thread: "
-                          << args.id << "\n";
-                COUT_UNLOCK
-#endif
-
-                pthread_t temp;
-                pthread_create(&temp, NULL, reducer_worker, &args.id);
-
-                // Save this pthread id in the global vector to be joined by the
-                // main thread later.
-                reducer_workers.push_back(temp);
-            }
-
-            // Now, the reducer connection should be in the map. Get a reference
-            // to it.
-            auto &r_con = thread_conns.at(id);
-
-            // Push data into inter-thread queue
-            pthread_mutex_lock(&r_con.q_lock);
-
-            // Wait for queue to have room to push a new one (AKA wait for not
-            // full)
-            while (r_con.q_full) {
-#ifdef DEBUG
-                COUT_LOCK
-                std::cout << "\033[33;1m[m] queue is full. Waiting for a "
-                             "reducer "
-                             "worker to alert us that it is no longer "
-                             "full...\033[0m\n";
-                COUT_UNLOCK
-#endif
-
-                pthread_cond_wait(&r_con.q_full_cond, &r_con.q_lock);
-            }
-
-#ifdef DEBUG
-            COUT_LOCK
-            std::cout << "[m] queue is no longer full!\n";
-            COUT_UNLOCK
-#endif
-
-            // At this point, queue is not full.
-            r_con.q.push(m_data);
-
-            // Now that we've pushed a new item, tell other
-            // threads that the queue is no longer empty.
-            r_con.q_empty = false;
-            pthread_cond_signal(&r_con.q_empty_cond);
-
-            // TODO: above line wakes up a reducer *every* time.
-            // Instead, wake the reducer when the buffer is full
-            // (in context of having reducers for each user ID)
-            // - more efficient, probably less error-prone too
-
-            // However, it may be full.
-            if (r_con.q.size() == BUF_SIZE) {
-                r_con.q_full = true;
-            }
-
-            pthread_mutex_unlock(&r_con.q_lock);
-
-            // Reset token index for next round.
-            token_i = 0;
+        // Move on to next token
+        if (!(token = strtok_r(rest, delims, &rest))) {
+            std::cout << "ERROR: Token was NULL, expected action.\n";
+            exit(EXIT_FAILURE);
         }
+
+        const auto score = action_points.at(token);  // Cooresponding score
+
+        // Move on to next token
+        if (!(token = strtok_r(rest, delims, &rest))) {
+            std::cout << "ERROR: Token was NULL, expected topic.\n";
+            exit(EXIT_FAILURE);
+        }
+
+        const auto topic = token;
+
+        // All the tokens are collected! Construct the mapped tuple object.
+        mapper_out_data m_data{id, topic, score};
+
+#ifdef DEBUG
+        COUT_LOCK
+        std::cout << "[m] " << m_data << "\n";
+        COUT_UNLOCK
+#endif
+        // TODO check if we have added too many reducer threads and print a
+        // warning or something?
+
+        // Time to push the data to the appropriate reducer thread.
+        // First, get the struct with IPC stuff
+        try {
+            thread_conns.at(id);
+        } catch (const std::out_of_range &) {
+#ifdef DEBUG
+            COUT_LOCK
+            std::cout << "[m] creating a new reducer.\n";
+            COUT_UNLOCK
+#endif
+
+            // This reducer hasn't been spun up yet. Let's make a new one.
+            thread_conns[id] = ReducerConnection(id);
+
+            auto &args = thread_conns.at(
+                id);  // TODO just pass id to reducer, it can get args there
+#ifdef DEBUG
+            COUT_LOCK
+            std::cout << "[m] passing args to new reducer thread: " << args.id
+                      << "\n";
+            COUT_UNLOCK
+#endif
+
+            pthread_t temp;
+            pthread_create(&temp, NULL, reducer_worker, &args.id);
+
+            // Save this pthread id in the global vector to be joined by the
+            // main thread later.
+            reducer_workers.push_back(temp);
+        }
+
+        // Now, the reducer connection should be in the map. Get a reference
+        // to it.
+        auto &r_con = thread_conns.at(id);
+
+        // Push data into inter-thread queue
+        pthread_mutex_lock(&r_con.q_lock);
+
+        // Wait for queue to have room to push a new one (AKA wait for not
+        // full)
+        while (r_con.q_full) {
+#ifdef DEBUG
+            COUT_LOCK
+            std::cout << "\033[33;1m[m] queue is full. Waiting for a "
+                         "reducer "
+                         "worker to alert us that it is no longer "
+                         "full...\033[0m\n";
+            COUT_UNLOCK
+#endif
+
+            pthread_cond_wait(&r_con.q_full_cond, &r_con.q_lock);
+        }
+
+#ifdef DEBUG
+        COUT_LOCK
+        std::cout << "[m] queue is no longer full!\n";
+        COUT_UNLOCK
+#endif
+
+        // At this point, queue is not full.
+        r_con.q.push(m_data);
+
+        // Now that we've pushed a new item, tell other
+        // threads that the queue is no longer empty.
+        r_con.q_empty = false;
+        pthread_cond_signal(&r_con.q_empty_cond);
+
+        // TODO: above line wakes up a reducer *every* time.
+        // Instead, wake the reducer when the buffer is full
+        // (in context of having reducers for each user ID)
+        // - more efficient, probably less error-prone too
+
+        // However, it may be full.
+        if (r_con.q.size() == BUF_SIZE) {
+            r_con.q_full = true;
+        }
+
+        pthread_mutex_unlock(&r_con.q_lock);
+
+        // Reset token index for next round.
+        // token_i = 0;
+        // }
 
     }  // end of while
 
