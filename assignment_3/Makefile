@@ -1,11 +1,17 @@
 CC=g++
-CFLAGS=-Wall -Wextra -g
-OUTPUT=-o main
+OUTPUT=transfProg
+CFLAGS=-Wall -Wextra -g -o $(OUTPUT)
 
 all: main
 
-main: main.cpp
-	$(CC) $(OUTPUT) $(CFLAGS) main.cpp
+$(OUTPUT): main.cpp
+	$(CC) $(CFLAGS) main.cpp
+
+run: $(OUTPUT)
+	./$(OUTPUT) a3_input.txt 3
+
+test: $(OUTPUT)
+	./$(OUTPUT) input_hw3.txt 3
 
 clean:
-	rm main
+	rm $(OUTPUT)
