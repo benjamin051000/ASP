@@ -3,11 +3,11 @@
 
 #include <fstream>
 #include <iostream>
+#include <queue>
 #include <regex>
 #include <sstream>
 #include <unordered_map>
 #include <vector>
-#include <queue>
 
 #define DEBUG_MODE
 // Usage: `D(cout << "debug print\n";)
@@ -19,7 +19,10 @@ pthread_mutex_t cout_lock;
 #define COUTL pthread_mutex_lock(&cout_lock)
 #define COUTU pthread_mutex_unlock(&cout_lock)
 
-#define DPRNTL(x) COUTL; cout << x << "\n"; COUTU;
+#define DPRINTL(x)     \
+    COUTL;             \
+    cout << x << "\n"; \
+    COUTU;
 #else
 // Give them definitions that get compiled away
 #define D(x)
@@ -41,20 +44,16 @@ struct AccountData {
     pthread_mutex_t lock;
     int val;
 
-    AccountData(int val): val(val) {
-        pthread_mutex_init(&lock, NULL);
-    }
+    AccountData(int val) : val(val) { pthread_mutex_init(&lock, NULL); }
 
-    ~AccountData() {
-        pthread_mutex_destroy(&lock);
-    }
+    ~AccountData() { pthread_mutex_destroy(&lock); }
 };
 
 /**
  * @brief Transaction details
  */
 class Transaction {
-public:
+   public:
     account_id_t src, dest;
     int amt;
 };
@@ -71,7 +70,6 @@ std::vector<string> split(const std::string str, const std::string regex_str) {
             std::sregex_token_iterator()};
 }
 
-
 void* worker(void* args);
 
 /**
@@ -81,13 +79,13 @@ unordered_map<account_id_t, AccountData> accounts;
 
 /**
  * @brief Initialize accounts map
- * 
+ *
  * @param tokens vector of string tokens.
- * @return 
+ * @return
  */
 int init_accounts(const std::vector<string>& tokens) {
     auto iter = tokens.begin();
-    
+
     while (iter != tokens.end() and *iter != "Transfer") {
         // Get account number
         account_id_t account = *iter++;
@@ -97,18 +95,19 @@ int init_accounts(const std::vector<string>& tokens) {
         // Add to the map
         accounts.insert({account, AccountData(val)});
     }
-    
+
     D(std::cout << "-----Accounts created-----\n";)
-    
+
     // Print the map out
-    D(for (auto& key: accounts) {
-        cout << key.first << ": " << key.second.val << "\n";
-    })
+    D(for (auto& key
+           : accounts) { cout << key.first << ": " << key.second.val << "\n"; })
 
     // Ensure the iterator stopped just before the first "Transfer" token.
-    // If it did, the iterator successfully went through each initial account ID and value.
-    if(*iter != "Transfer") {
-        std::cerr << "ERROR: Token iterator did not parse account initial values properly.\n";
+    // If it did, the iterator successfully went through each initial account ID
+    // and value.
+    if (*iter != "Transfer") {
+        std::cerr << "ERROR: Token iterator did not parse account initial "
+                     "values properly.\n";
         exit(EXIT_FAILURE);
     }
 
@@ -116,7 +115,8 @@ int init_accounts(const std::vector<string>& tokens) {
     return iter - tokens.begin();
 }
 
-// TODO is it smart to combine these into one class? Should pthread_t be in it's own DS? Not sure.
+// TODO is it smart to combine these into one class? Should pthread_t be in it's
+// own DS? Not sure.
 struct WorkerData {
     /**
      * Thread ID
@@ -141,17 +141,16 @@ struct WorkerData {
 /**
  * @brief Worker threads with their queues and semaphores
  */
-std::vector<WorkerData> workers; // TODO does this need to be global? Probably...
+std::vector<WorkerData> workers;
 
 /**
- * @brief Round-robin index to determine which worker to send data to next.
- * 
+ * @brief global flag to alert workers when there 
+ * is no new data and they can stop working.
  */
-int next_worker = 0; // TODO does this need to be global? Probably...
 bool no_new_data = false;
 
-void dispatch_transfer_jobs(const std::vector<string>& tokens, const int offset, const int num_workers) {
-    
+void dispatch_transfer_jobs(const std::vector<string>& tokens, const int offset,
+                            const int num_workers) {
     // Create threads.
     for (int i = 0; i < num_workers; i++) {
         pthread_t t;
@@ -160,13 +159,17 @@ void dispatch_transfer_jobs(const std::vector<string>& tokens, const int offset,
         // D(cout << "Created thread " << t << ", idx=" << i << "\n";)
         workers.push_back(WorkerData(t));
     }
-    
+
     auto it = tokens.begin() + offset;
-    
-    while(it != tokens.end()) {
-        
+
+    /**
+     * @brief Round-robin index to determine which worker to send data to next.
+     */
+    int next_worker = 0;  // TODO does this need to be global? Probably...
+
+    while (it != tokens.end()) {
         // D(cout << *it << "\n");
-        
+
         // First one is "Transfer". Skip it.
         it++;
 
@@ -175,84 +178,108 @@ void dispatch_transfer_jobs(const std::vector<string>& tokens, const int offset,
         string dest = *it++;
 
         int amt = std::stoi(*it++);
-        
+
         // Create transaction object
         Transaction t{source, dest, amt};
-        
 
         // Put it in the queue to the next worker thread in the round robin.
         // TODO this is where you left off
+        D(int temp_idx = next_worker;)
         auto& conn = workers[next_worker++];
 
         // Keep within bounds of num_workers
         next_worker %= num_workers;
 
         // Acquire lock
-        pthread_mutex_lock(&conn.q_lock); // TODO this is failing
-        
+        pthread_mutex_lock(&conn.q_lock);  // TODO this is failing
+
         conn.q.push(t);
-        
+
+        // DPRINTL("[d] Posting semaphore...")
         // Increment the semaphore.
         sem_post(&conn.q_size);
 
+        int size;
+        sem_getvalue(&conn.q_size, &size);
+        DPRINTL("[d] t " << temp_idx << " q_size after post: " << size)
+
         pthread_mutex_unlock(&conn.q_lock);
-    } // end of while
+    }  // end of while
 
     // Alert worker threads that we are done.
     no_new_data = true;
 }
 
 void* worker(void* args) {
-    
     // Get connection from args
     int idx;
     {
-        // Inner scope in case I want to 
+        // Inner scope in case I want to
         // reuse "temp" as a var name later
         int* temp = static_cast<int*>(args);
         idx = *temp;
         delete temp;
     }
 
-    DPRNTL("[worker] " << idx)
+    DPRINTL("[t " << idx << "] Started.")
     auto& conn = workers[idx];
 
-    DPRNTL("thread id: " << conn.thread)
-
     // While the dispatcher is still sending out data...
-    while(!no_new_data) {
-        
+    while (true) {
+        int curr_q_size;
+        sem_getvalue(&conn.q_size, &curr_q_size);
+        if (no_new_data and curr_q_size == 0) {
+            break;
+        }
+
+        DPRINTL("[t " << idx << "] q_size before waiting: " << curr_q_size)
+        DPRINTL("[t " << idx << "] waiting on q.size...")
+
         // Ensure there is data.
         sem_wait(&conn.q_size);
 
+        // The main thread may have posted to
+        // alert us that there is no new data.
+        if(no_new_data) {
+            break;
+        }
+
+        DPRINTL("[t " << idx << "] waiting on queue mutex...")
+
         // Get data from the queue
         pthread_mutex_lock(&conn.q_lock);
-        
+
         // src, dest, amt
         auto data = conn.q.front();
         conn.q.pop();
 
         pthread_mutex_unlock(&conn.q_lock);
-        
+
         // Next, DPP. We need to acquire the mutexes for src and dest accounts.
         // Then, we change their data.
         // Then, release both.
 
-        // Since only the dispatcher writes to accounts, probably doesn't need a mutex.
+        // Since only the dispatcher writes to accounts, probably doesn't need a
+        // mutex.
         auto& src = accounts.at(data.src);
         auto& dest = accounts.at(data.dest);
-        
+
         // If this thread is even in the round-robin, acq src first.
         // Otherwise, acq dest first.
-        if(idx % 2 == 0) {
+        if (idx % 2 == 0) {
+            DPRINTL("[t " << idx << "] waiting on src mutex...")
             // Acquire one mutex
             pthread_mutex_lock(&src.lock);
+
+            DPRINTL("[t " << idx << "] waiting on dest mutex...")
             // Acquire other mutex
             pthread_mutex_lock(&dest.lock);
-        }
-        else {
+        } else {
             // Acquire in reverse order (prevents deadlocking).
+            DPRINTL("[t " << idx << "] waiting on dest mutex...")
             pthread_mutex_lock(&dest.lock);
+
+            DPRINTL("[t " << idx << "] waiting on src mutex...")
             pthread_mutex_lock(&src.lock);
         }
 
@@ -263,10 +290,13 @@ void* worker(void* args) {
         // Release both mutexes
         pthread_mutex_unlock(&dest.lock);
         pthread_mutex_unlock(&src.lock);
-    }
-    DPRNTL("worker " << conn.thread)
 
-    return nullptr; 
+        DPRINTL("[t " << idx << "] Transaction complete.")
+    }
+
+    DPRINTL("[t " << idx << "] done.")
+
+    return nullptr;
 }
 
 int main(int argc, char* argv[]) {
@@ -283,7 +313,7 @@ int main(int argc, char* argv[]) {
     const int NUM_WORKERS = std::stoi(argv[2]);
 
     D(cout << "input filename: " << INPUT_FILENAME
-                << "\nnum workers: " << NUM_WORKERS << "\n";)
+           << "\nnum workers: " << NUM_WORKERS << "\n";)
 
     // Open file
     std::ifstream file(INPUT_FILENAME);
@@ -299,22 +329,42 @@ int main(int argc, char* argv[]) {
     std::string s = ss.str();
 
     // Split tokens
-    auto tokens = split(s, "[ \n]"); // Delimiters are spaces OR newlines.
+    auto tokens = split(s, "[ \n]");  // Delimiters are spaces OR newlines.
     D(for (auto& token : tokens) { cout << token << "\n"; })
 
     const auto transfer_idx = init_accounts(tokens);
-    
+
     D(cout << "-----Dispatching transactions-----\n";)
 
     dispatch_transfer_jobs(tokens, transfer_idx, NUM_WORKERS);
+
+    DPRINTL("-----Dispatch done. Waiting on workers to finish.-----")
+
+    // Post all the semaphores just in case one 
+    // was blocked waiting for data when the dispatcher quit.
+    for(int i = 0; i < NUM_WORKERS; i++) {
+        auto& t = workers[i];
+
+        sem_post(&t.q_size);
+        int size;
+        sem_getvalue(&t.q_size, &size);
+        DPRINTL("t " << i << " q_size after post: " << size)
+    }
 
     // Join threads
     for (auto& t : workers) {
         pthread_join(t.thread, NULL);
     }
 
+    DPRINTL("----------")
+
+    // Print final results
+    for (auto& key: accounts) { 
+        cout << key.first << " " << key.second.val << "\n"; 
+    }
+
     D(pthread_mutex_destroy(&cout_lock);)
 
-    D(cout << "Done.\n";)
+    D(cout << "----------\nDone.\n";)
     return 0;
 }
