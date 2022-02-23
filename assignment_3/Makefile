@@ -1,8 +1,8 @@
 CC=g++
 OUTPUT=transfProg
-CFLAGS=-Wall -Wextra -g -o $(OUTPUT)
+CFLAGS=-Wall -Wextra -pthread -g -o $(OUTPUT)
 
-all: main
+all: $(OUTPUT)
 
 $(OUTPUT): main.cpp
 	$(CC) $(CFLAGS) main.cpp
