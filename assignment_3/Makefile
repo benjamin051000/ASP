@@ -9,13 +9,13 @@ $(OUTPUT): main.cpp
 	$(CC) $(CFLAGS) main.cpp
 
 run: $(OUTPUT)
-	./$(OUTPUT) a3_input.txt $(NUM_WORKERS)
+	./$(OUTPUT) tests/a3_input.txt $(NUM_WORKERS)
 
 hw: $(OUTPUT)
-	./$(OUTPUT) input_hw3.txt $(NUM_WORKERS)
+	./$(OUTPUT) tests/input_hw3.txt $(NUM_WORKERS)
 
 simple: $(OUTPUT)
-	./$(OUTPUT) simple_input.txt $(NUM_WORKERS)
+	./$(OUTPUT) tests/simple_input.txt $(NUM_WORKERS)
 
 clean:
 	rm $(OUTPUT)
