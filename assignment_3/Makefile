@@ -1,7 +1,7 @@
 CC=g++
 OUTPUT=transfProg
 CFLAGS=-Wall -Wextra -pthread -g -o $(OUTPUT)
-NUM_WORKERS=2
+NUM_WORKERS=1
 
 all: $(OUTPUT)
 
@@ -13,6 +13,9 @@ run: $(OUTPUT)
 
 hw: $(OUTPUT)
 	./$(OUTPUT) input_hw3.txt $(NUM_WORKERS)
+
+simple: $(OUTPUT)
+	./$(OUTPUT) simple_input.txt $(NUM_WORKERS)
 
 clean:
 	rm $(OUTPUT)
