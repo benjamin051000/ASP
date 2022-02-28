@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
-#define DEBUG_MODE
+// #define DEBUG_MODE
 // Usage: `D(cout << "debug print\n";)
 // If DEBUG_MODE is not defined, these won't be compiled. Nice, right?
 #ifdef DEBUG_MODE
@@ -199,8 +199,8 @@ void dispatch_transfer_jobs(const std::vector<string>& tokens, const int offset,
         // Increment the semaphore.
         sem_post(&conn.q_size);
 
-        int size;
-        sem_getvalue(&conn.q_size, &size);
+        D(int size;
+        sem_getvalue(&conn.q_size, &size);)
         DPRINTL("[d] t " << temp_idx << " q_size after post: " << size)
 
         pthread_mutex_unlock(&conn.q_lock);
@@ -240,7 +240,10 @@ void* worker(void* args) {
 
         // The main thread may have posted to
         // alert us that there is no new data.
-        if(no_new_data) {
+        // Double check semaphore size, too.
+        sem_getvalue(&conn.q_size, &curr_q_size);
+
+        if(no_new_data and curr_q_size == 0) {
             break;
         }
 
