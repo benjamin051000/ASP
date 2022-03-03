@@ -3,6 +3,7 @@
 #include <regex>
 #include <string>
 #include <vector>
+#include <array>
 #include <iostream>
 #include <unordered_map>
 #include <sys/mman.h>
@@ -25,11 +26,23 @@ using score_t = int;
 #endif
 /////////////////////////////////////////
 
-struct mapped_data_t;
+/**
+ * @brief Tuple to hold score adjustments per topic for an ID.
+ * Mapper will send this info to the reducer designated for this action's ID.
+ */
+struct mapped_data_t {
+    topic_t topic;
+    score_t score_adjustment;
+};
+
 
 struct mapped_data_structure {
-    // TODO make this a map with IDs as keys and Queues and stuff as values
-    std::vector<mapped_data_t> data;
+    static const size_t NUM_REDUCERS = 7;
+    static const size_t NUM_ENTRIES = 10;
+    // Matrix: 1st dim is ID, 2nd dim is array of data (basically a queue)
+    std::array<std::array<mapped_data_t, NUM_ENTRIES>, NUM_REDUCERS> data;
+    std::array<int, NUM_REDUCERS> tails; 
+    int head = 0, tail = 0; // Used for indexing into the array
 };
 
 
@@ -70,19 +83,10 @@ std::vector<string> split(const std::string str, const std::string regex_str) {
  */
 struct input_data_t {
     const userid_t id;
-    const topic_t topic; // TODO topics still have trailing whitespace, consider stripping it
     const string action;
+    const topic_t topic; // TODO topics still have trailing whitespace, consider stripping it
 };
 
-
-/**
- * @brief Tuple to hold score adjustments per topic for an ID.
- * Mapper will send this info to the reducer designated for this action's ID.
- */
-struct mapped_data_t {
-    topic_t topic;
-    score_t score_adjustment;
-};
 
 /**
  * @brief Parse tokens into actions.
@@ -118,6 +122,8 @@ std::vector<input_data_t> parse_actions(const std::vector<string>& tokens) {
  * @brief Mapper worker process
  */
 void mapper(const std::vector<string>& tokens, mapped_data_structure* shared_mem) {
+    // Used to convert user ID to an index, in the mmapped array.
+    static std::vector<userid_t> id_index;
 
     const auto actions = parse_actions(tokens);
 
@@ -127,16 +133,57 @@ void mapper(const std::vector<string>& tokens, mapped_data_structure* shared_mem
 
     // Next, send the mapped data to the reducer.
     for(auto& action: actions) {
+        // Get the index corresponding to this ID.
+        const auto iter = std::find(id_index.begin(), id_index.end(), action.id);
+        
+        // Index used to push the data to the reducer.
+        int index;
+
+        if(iter == id_index.end()) {
+            // It wasn't in the vector. Add it
+            id_index.push_back(action.id);
+            index = id_index.size() - 1;
+        }
+        else {
+            // Get the index this element is at in the vector.
+            index = std::distance(id_index.begin(), iter);
+        }
+
+        DP("ID " << action.id << " mapped to index " << index)
+
+        DP("checking action \"" << action.action << "\"\n")
+
+        // Create score object to be shared with reducer process
         const auto score = mapped_data_t {
             action.topic,
             action_points.at(action.action)
         };
 
+        // Acquire lock
         // Send to mapped region
-        shared_mem->data.push_back(score);
+        shared_mem->data[index][shared_mem->tails[index]++] = score;
     }
 }
 
+/**
+ * @brief Print shared mem out.
+ * For debugging purposes.
+ */
+void dump_shared_mem(mapped_data_structure* shared_mem) {
+    printf("----------dump_shared_mem()----------\n");
+    for(unsigned i = 0; i < shared_mem->data.size(); i++) {
+        
+        const auto row = shared_mem->data[i];
+        printf("Row %d (size: %d)\n\t{", i, shared_mem->tails[i]);
+
+        for(const auto& val: row) {
+            // printf("{%s, %d}, ", val.topic, val.score_adjustment);
+            std::cout << "{" << val.topic << ", " << val.score_adjustment << "}, ";
+        }
+        printf("}\n");
+    }
+    printf("----------dump_shared_mem() done----------\n");
+}
 
 // } // end of namespace mapper_stuff
 
@@ -175,9 +222,11 @@ int main(int argc, char* argv[]) {
         printf("Error: Couldn't map memory region.\n");
         exit(EXIT_FAILURE);
     }
-    *mapped_region = mapped_data_structure();
+    // *mapped_region = mapped_data_structure();
 
     mapper(tokens, mapped_region);
+
+    dump_shared_mem(mapped_region);
 
     // Unmap shared memory
     if(munmap(mapped_region, sizeof(mapped_data_structure)) == -1) {
