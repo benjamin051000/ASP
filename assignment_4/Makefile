@@ -1,6 +1,6 @@
 CC=g++
 OUTPUT=a4
-CFLAGS=-Wall -Wextra -g -o $(OUTPUT)
+CFLAGS=-Wall -Wextra -pthread -g -o $(OUTPUT)
 BUF_SIZE=10
 NUM_REDUCERS=1
 

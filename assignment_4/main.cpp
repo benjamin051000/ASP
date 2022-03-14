@@ -8,6 +8,8 @@
 #include <unordered_map>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <semaphore.h>
+#include <wait.h>
 using std::string;
 
 using userid_t = string;
@@ -34,6 +36,7 @@ using score_t = int;
 struct mapped_data_t {
     topic_t topic;
     score_t score_adjustment;
+    bool done = false;
 };
 
 
@@ -52,22 +55,29 @@ struct mapped_data_structure {
     // Mutex locks for each R/W operation to the reducer queues.
     std::array<pthread_mutex_t, NUM_REDUCERS> locks;
 
-    // tails keeps track of which index in the data[ID] queue is the end of it.
-    std::array<int, NUM_REDUCERS> tails; // TODO do we also need heads?
+    // sizes keeps track of which index in the data[ID] queue is the end of it.
+    std::array<sem_t, NUM_REDUCERS> sizes; // TODO do we also need heads?
     
     int head = 0, tail = 0; // Used for indexing into the array // TODO what is this for?
 
+    pthread_mutexattr_t attr; // Used for setting mutexes to process-share
+
     void init() {
         for(auto& l: locks) {
-            pthread_mutex_init(&l, NULL); // TODO SET PROCESS SHARED!
-            PTHREAD_PROCESS_SHARED;
+            pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+            pthread_mutex_init(&l, &attr); 
+        }
+        for(auto& s: sizes) {
+            sem_init(&s, 1, 0);
         }
     }
 
-    ~mapped_data_structure() {
-        // TODO does this ever get called? Probably only if you delete from shared mem? Not sure.
+    void destroy() {
         for(auto& l: locks) {
             pthread_mutex_destroy(&l);
+        }
+        for(auto& s: sizes) {
+            sem_destroy(&s);
         }
     }
 };
@@ -122,7 +132,7 @@ struct input_data_t {
  */
 std::vector<input_data_t> parse_actions(const std::vector<string>& tokens) {
     
-    DP("----------parse_actions()----------")
+    // DP("----------parse_actions()----------")
     std::vector<input_data_t> actions;
     
     // Iterate through the tokens and produce action tuples.
@@ -138,10 +148,10 @@ std::vector<input_data_t> parse_actions(const std::vector<string>& tokens) {
         );
     }
 
-    D(for(const auto& action: actions) {
-        std::cout << "action {" << action.id << ", " << action.topic << ", " << action.action << "}\n";
-    })
-    DP("----------parse_actions() done.----------")
+    // D(for(const auto& action: actions) {
+    //     std::cout << "action {" << action.id << ", " << action.topic << ", " << action.action << "}\n";
+    // })
+    // DP("----------parse_actions() done.----------")
     return actions;
 }
 
@@ -181,9 +191,7 @@ void mapper(const std::vector<string>& tokens, mapped_data_structure* shared_mem
             index = std::distance(id_index.begin(), iter);
         }
 
-        DP("ID " << action.id << " mapped to index " << index)
-
-        DP("checking action \"" << action.action << "\"\n")
+        DP("[m] ID " << action.id << " mapped to index " << index)
 
         // Create score object to be shared with reducer process
         const auto score = mapped_data_t {
@@ -195,7 +203,15 @@ void mapper(const std::vector<string>& tokens, mapped_data_structure* shared_mem
         pthread_mutex_lock(&shared_mem->locks[index]);
         DP("[m] acquired lock. Pushing new data into the queue now...")
         // Send to mapped region
-        shared_mem->data[index][shared_mem->tails[index]++] = score;
+        // Get current size
+
+        int size;
+        sem_getvalue(&shared_mem->sizes[index], &size);
+
+        shared_mem->data[index][size] = score;
+
+        sem_post(&shared_mem->sizes[index]);
+
         // Release lock
         pthread_mutex_unlock(&shared_mem->locks[index]);
         DP("[m] released lock.\n")
@@ -213,7 +229,10 @@ void dump_shared_mem(mapped_data_structure* shared_mem) {
     for(unsigned i = 0; i < shared_mem->data.size(); i++) {
         
         const auto row = shared_mem->data[i];
-        printf("Row %d (size: %d): {", i, shared_mem->tails[i]);
+        int size;
+        sem_getvalue(&shared_mem->sizes[i], &size);
+
+        printf("Row %d (size: %d): {", i, size);
 
         for(const auto& val: row) {
             // printf("{%s, %d}, ", val.topic, val.score_adjustment);
@@ -239,13 +258,42 @@ void dump_shared_mem(mapped_data_structure* shared_mem) {
 void reducer(mapped_data_structure* mapped_data, int id) {
     DP("[r] Reducer spun up with id " << id)
 
-    // Attempt to acquire the first element in the queue.
-    const auto size = mapped_data->tails[id];
+    std::unordered_map<topic_t, score_t> total_scores; // topic -> total score for this ID
 
-    std::unordered_map<topic_t, score_t> reduced_scores;
-    for(int i = 0; i < size; i++) {
+    int i = 0;
+
+    while(true) {
+        
+        DP("[r] waiting for size sem...")
+        
+        // Wait for data to appear in the queue.
+        sem_wait(&mapped_data->sizes[id]);
+        
+        DP("[r] Got sem. Waiting for lock...")
+    // for(unsigned i = 0; i < size; i++) {
         // Get a new value from shared mem.
+        pthread_mutex_lock(&mapped_data->locks[id]); // Acquire lock
+
+        // Now, read the data.
+        auto val = mapped_data->data[id][i];
+        
+        DP("[r] Updating topic " << val.topic << "...")
+
+        // This is okay, since operator[] will construct a default value if it doesn't exist. Nice!
+        total_scores[val.topic] += val.score_adjustment;
+
+        pthread_mutex_unlock(&mapped_data->locks[id]); // Release lock
+
+        i++;
     }
+
+    D(
+        // Print resulting map
+        for(auto& e: total_scores) {
+            printf("[r] Total scores for id %d:\n", id);
+            printf("[r]  Topic \"%s\": %d\n", e.first.c_str(), e.second);    
+        }
+    )
 
     exit(EXIT_SUCCESS); // Exit this process
 }
@@ -273,11 +321,11 @@ int main(int argc, char* argv[]) {
         if (e.find_first_not_of(' ') != string::npos) tokens.push_back(e);
     }
 
-    DP("----------printing tokens from split()----------")
-    D(for (const auto& tok : tokens) {
-        printf("%s\n", tok.c_str());
-    })
-    DP("----------done printing tokens----------")
+    // DP("----------printing tokens from split()----------")
+    // D(for (const auto& tok : tokens) {
+    //     printf("%s\n", tok.c_str());
+    // })
+    // DP("----------done printing tokens----------")
 
     // Set up shared memory
     auto *mapped_region = (mapped_data_structure*)mmap(NULL, sizeof(mapped_data_structure), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
@@ -289,7 +337,7 @@ int main(int argc, char* argv[]) {
     // Initialize mapped region mutex locks and whatnot
     mapped_region->init();
 
-    D(dump_shared_mem(mapped_region);)
+    // D(dump_shared_mem(mapped_region);)
     
     for(int i = 0; i < num_reducers; i++) {
 
@@ -310,6 +358,13 @@ int main(int argc, char* argv[]) {
     mapper(tokens, mapped_region);
 
     D(dump_shared_mem(mapped_region);)
+
+    for(int i = 0; i < num_reducers; i++) {
+        wait(NULL);
+    }
+
+    // Destroy mutexes and semaphores.
+    mapped_region->destroy();
 
     // Unmap shared memory
     if(munmap(mapped_region, sizeof(mapped_data_structure)) == -1) {
