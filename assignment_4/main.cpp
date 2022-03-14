@@ -7,6 +7,7 @@
 #include <iostream>
 #include <unordered_map>
 #include <sys/mman.h>
+#include <unistd.h>
 using std::string;
 
 using userid_t = string;
@@ -36,13 +37,39 @@ struct mapped_data_t {
 };
 
 
+/** mapped_data_structure
+ * @brief Data structure the mmapped region will be cast to.
+ * Use this as a convenience tool for accessing members
+ * in the mmapped region.
+ */
 struct mapped_data_structure {
     static const size_t NUM_REDUCERS = 7;
     static const size_t NUM_ENTRIES = 10;
+    
     // Matrix: 1st dim is ID, 2nd dim is array of data (basically a queue)
     std::array<std::array<mapped_data_t, NUM_ENTRIES>, NUM_REDUCERS> data;
-    std::array<int, NUM_REDUCERS> tails; 
-    int head = 0, tail = 0; // Used for indexing into the array
+    
+    // Mutex locks for each R/W operation to the reducer queues.
+    std::array<pthread_mutex_t, NUM_REDUCERS> locks;
+
+    // tails keeps track of which index in the data[ID] queue is the end of it.
+    std::array<int, NUM_REDUCERS> tails; // TODO do we also need heads?
+    
+    int head = 0, tail = 0; // Used for indexing into the array // TODO what is this for?
+
+    void init() {
+        for(auto& l: locks) {
+            pthread_mutex_init(&l, NULL); // TODO SET PROCESS SHARED!
+            PTHREAD_PROCESS_SHARED;
+        }
+    }
+
+    ~mapped_data_structure() {
+        // TODO does this ever get called? Probably only if you delete from shared mem? Not sure.
+        for(auto& l: locks) {
+            pthread_mutex_destroy(&l);
+        }
+    }
 };
 
 
@@ -97,12 +124,12 @@ std::vector<input_data_t> parse_actions(const std::vector<string>& tokens) {
     
     DP("----------parse_actions()----------")
     std::vector<input_data_t> actions;
-
+    
     // Iterate through the tokens and produce action tuples.
     auto it = tokens.begin();
     while(it != tokens.end()) {
         actions.push_back(
-            // TODO Does this copy? I think it does
+            // TODO Does this copy into input_data_t? I think it does
             input_data_t {
                 *it++,
                 *it++,
@@ -120,8 +147,13 @@ std::vector<input_data_t> parse_actions(const std::vector<string>& tokens) {
 
 /**
  * @brief Mapper worker process
+ * 
+ * @param tokens vector of strings from stdin.
+ * @param shared_mem 
  */
 void mapper(const std::vector<string>& tokens, mapped_data_structure* shared_mem) {
+    DP("----------mapper()----------")
+
     // Used to convert user ID to an index, in the mmapped array.
     static std::vector<userid_t> id_index;
 
@@ -131,7 +163,7 @@ void mapper(const std::vector<string>& tokens, mapped_data_structure* shared_mem
     const std::unordered_map<string, score_t> action_points{
         {"P", 50}, {"L", 20}, {"D", -10}, {"C", 30}, {"S", 40}};
 
-    // Next, send the mapped data to the reducer.
+    // Next, send the mapped data to the reducer, action by action.
     for(auto& action: actions) {
         // Get the index corresponding to this ID.
         const auto iter = std::find(id_index.begin(), id_index.end(), action.id);
@@ -156,13 +188,19 @@ void mapper(const std::vector<string>& tokens, mapped_data_structure* shared_mem
         // Create score object to be shared with reducer process
         const auto score = mapped_data_t {
             action.topic,
-            action_points.at(action.action)
+            action_points.at(action.action) // convert action to points
         };
 
         // Acquire lock
+        pthread_mutex_lock(&shared_mem->locks[index]);
+        DP("[m] acquired lock. Pushing new data into the queue now...")
         // Send to mapped region
         shared_mem->data[index][shared_mem->tails[index]++] = score;
+        // Release lock
+        pthread_mutex_unlock(&shared_mem->locks[index]);
+        DP("[m] released lock.\n")
     }
+    DP("----------done with mapper()----------")
 }
 
 /**
@@ -171,16 +209,17 @@ void mapper(const std::vector<string>& tokens, mapped_data_structure* shared_mem
  */
 void dump_shared_mem(mapped_data_structure* shared_mem) {
     printf("----------dump_shared_mem()----------\n");
+
     for(unsigned i = 0; i < shared_mem->data.size(); i++) {
         
         const auto row = shared_mem->data[i];
-        printf("Row %d (size: %d)\n\t{", i, shared_mem->tails[i]);
+        printf("Row %d (size: %d): {", i, shared_mem->tails[i]);
 
         for(const auto& val: row) {
             // printf("{%s, %d}, ", val.topic, val.score_adjustment);
             std::cout << "{" << val.topic << ", " << val.score_adjustment << "}, ";
         }
-        printf("}\n");
+        printf("}\n\n");
     }
     printf("----------dump_shared_mem() done----------\n");
 }
@@ -188,6 +227,28 @@ void dump_shared_mem(mapped_data_structure* shared_mem) {
 // } // end of namespace mapper_stuff
 
 
+//////////////////////////////////////////////////////
+
+/**
+ * @brief Reducer worker.
+ * Run after fork()ing.
+ * @param mapped_data Pointer to shared memory
+ * @param id Which index of the data array (AKA ID) 
+ * this reducer should work on.
+ */
+void reducer(mapped_data_structure* mapped_data, int id) {
+    DP("[r] Reducer spun up with id " << id)
+
+    // Attempt to acquire the first element in the queue.
+    const auto size = mapped_data->tails[id];
+
+    std::unordered_map<topic_t, score_t> reduced_scores;
+    for(int i = 0; i < size; i++) {
+        // Get a new value from shared mem.
+    }
+
+    exit(EXIT_SUCCESS); // Exit this process
+}
 //////////////////////////////////////////////////////
 
 int main(int argc, char* argv[]) {
@@ -212,9 +273,11 @@ int main(int argc, char* argv[]) {
         if (e.find_first_not_of(' ') != string::npos) tokens.push_back(e);
     }
 
+    DP("----------printing tokens from split()----------")
     D(for (const auto& tok : tokens) {
         printf("%s\n", tok.c_str());
     })
+    DP("----------done printing tokens----------")
 
     // Set up shared memory
     auto *mapped_region = (mapped_data_structure*)mmap(NULL, sizeof(mapped_data_structure), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
@@ -222,11 +285,31 @@ int main(int argc, char* argv[]) {
         printf("Error: Couldn't map memory region.\n");
         exit(EXIT_FAILURE);
     }
-    // *mapped_region = mapped_data_structure();
 
+    // Initialize mapped region mutex locks and whatnot
+    mapped_region->init();
+
+    D(dump_shared_mem(mapped_region);)
+    
+    for(int i = 0; i < num_reducers; i++) {
+
+        auto result = fork();
+        
+        if(result == -1) {
+            printf("Error: fork() didn't work.\n");
+            exit(EXIT_FAILURE);
+        }
+        else if(result == 0) {
+            // Child process
+            reducer(mapped_region, i); // Run the reducer.
+        }
+        // Parent process: Do nothing for now. Once all the reducers are made, run the mapper.
+    }
+
+    // Now that all the reducers are spun up, run the mapper.
     mapper(tokens, mapped_region);
 
-    dump_shared_mem(mapped_region);
+    D(dump_shared_mem(mapped_region);)
 
     // Unmap shared memory
     if(munmap(mapped_region, sizeof(mapped_data_structure)) == -1) {
