@@ -216,6 +216,27 @@ void mapper(const std::vector<string>& tokens, mapped_data_structure* shared_mem
         pthread_mutex_unlock(&shared_mem->locks[index]);
         DP("[m] released lock.\n")
     }
+    
+    // All data has been sent to all reducers.
+    // Now, append a "done" signal to each reducer queue.
+    for(int i = 0; i < id_index.size(); i++) {
+        pthread_mutex_lock(&shared_mem->locks[i]);
+        
+        int size;
+        sem_getvalue(&shared_mem->sizes[i], &size);
+        // Place new thing here
+        shared_mem->data[i][size] = mapped_data_t {
+            "",
+            0,
+            true // true signifies that there is no more data to be dealt with.
+        };
+
+        sem_post(&shared_mem->sizes[i]); // Wake up waiting procs (which will read the done signal)
+
+        pthread_mutex_unlock(&shared_mem->locks[i]);
+        DP("[m] Sent \"done\" value to reducer " << i)
+    }
+
     DP("----------done with mapper()----------")
 }
 
@@ -268,14 +289,20 @@ void reducer(mapped_data_structure* mapped_data, int id) {
         
         // Wait for data to appear in the queue.
         sem_wait(&mapped_data->sizes[id]);
-        
+
         DP("[r] Got sem. Waiting for lock...")
     // for(unsigned i = 0; i < size; i++) {
         // Get a new value from shared mem.
         pthread_mutex_lock(&mapped_data->locks[id]); // Acquire lock
+        DP("[r] Got lock.")
 
         // Now, read the data.
         auto val = mapped_data->data[id][i];
+
+        if(val.done) {
+            DP("Reducer for id " << id << " done. Goodbye.")
+            break;
+        }
         
         DP("[r] Updating topic " << val.topic << "...")
 
@@ -357,7 +384,9 @@ int main(int argc, char* argv[]) {
     // Now that all the reducers are spun up, run the mapper.
     mapper(tokens, mapped_region);
 
-    D(dump_shared_mem(mapped_region);)
+    // D(dump_shared_mem(mapped_region);)
+
+    DP("Waiting for reducer procs to finish...")
 
     for(int i = 0; i < num_reducers; i++) {
         wait(NULL);
