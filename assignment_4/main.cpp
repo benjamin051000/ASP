@@ -214,18 +214,23 @@ void mapper(const std::vector<string>& tokens, mapped_data_structure* shared_mem
 
         // Release lock
         pthread_mutex_unlock(&shared_mem->locks[index]);
-        DP("[m] released lock.\n")
+        DP("[m] released lock.")
     }
     
     // All data has been sent to all reducers.
     // Now, append a "done" signal to each reducer queue.
+    DP("id_index.size()= " << id_index.size())
     for(int i = 0; i < id_index.size(); i++) {
         pthread_mutex_lock(&shared_mem->locks[i]);
         
         int size;
         sem_getvalue(&shared_mem->sizes[i], &size);
         // Place new thing here
-        shared_mem->data[i][size] = mapped_data_t {
+
+        DP("[m] sem size is: " << size)
+        
+        DP("[m] Attempting to send \"done\" to reducer " << i)
+        shared_mem->data[i][size] = mapped_data_t { 
             "",
             0,
             true // true signifies that there is no more data to be dealt with.
@@ -234,7 +239,7 @@ void mapper(const std::vector<string>& tokens, mapped_data_structure* shared_mem
         sem_post(&shared_mem->sizes[i]); // Wake up waiting procs (which will read the done signal)
 
         pthread_mutex_unlock(&shared_mem->locks[i]);
-        DP("[m] Sent \"done\" value to reducer " << i)
+        DP("[m] Sent \"done\" to reducer " << i)
     }
 
     DP("----------done with mapper()----------")
@@ -277,7 +282,7 @@ void dump_shared_mem(mapped_data_structure* shared_mem) {
  * this reducer should work on.
  */
 void reducer(mapped_data_structure* mapped_data, int id) {
-    DP("[r] Reducer spun up with id " << id)
+    DP("[r " << id << "] Reducer spun up with id " << id)
 
     std::unordered_map<topic_t, score_t> total_scores; // topic -> total score for this ID
 
@@ -285,16 +290,16 @@ void reducer(mapped_data_structure* mapped_data, int id) {
 
     while(true) {
         
-        DP("[r] waiting for size sem...")
+        DP("[r " << id << "] waiting for size sem...")
         
         // Wait for data to appear in the queue.
         sem_wait(&mapped_data->sizes[id]);
 
-        DP("[r] Got sem. Waiting for lock...")
+        DP("[r " << id << "] Got sem. Waiting for lock...")
     // for(unsigned i = 0; i < size; i++) {
         // Get a new value from shared mem.
         pthread_mutex_lock(&mapped_data->locks[id]); // Acquire lock
-        DP("[r] Got lock.")
+        DP("[r " << id << "] Got lock.")
 
         // Now, read the data.
         auto val = mapped_data->data[id][i];
@@ -304,7 +309,7 @@ void reducer(mapped_data_structure* mapped_data, int id) {
             break;
         }
         
-        DP("[r] Updating topic " << val.topic << "...")
+        DP("[r " << id << "] Updating topic " << val.topic << "...")
 
         // This is okay, since operator[] will construct a default value if it doesn't exist. Nice!
         total_scores[val.topic] += val.score_adjustment;
@@ -317,8 +322,8 @@ void reducer(mapped_data_structure* mapped_data, int id) {
     D(
         // Print resulting map
         for(auto& e: total_scores) {
-            printf("[r] Total scores for id %d:\n", id);
-            printf("[r]  Topic \"%s\": %d\n", e.first.c_str(), e.second);    
+            printf("[r %d] Total scores for id %d:\n", id, id);
+            printf("[r %d]  Topic \"%s\": %d\n", id, e.first.c_str(), e.second);    
         }
     )
 
