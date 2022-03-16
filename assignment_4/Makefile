@@ -12,11 +12,9 @@ $(OUTPUT): main.cpp
 run: $(OUTPUT)
 	./$(OUTPUT) $(BUF_SIZE) $(NUM_REDUCERS) < ./tests/input.txt
 
-# hw: $(OUTPUT)
-# ./$(OUTPUT) tests/input_hw3.txt $(NUM_WORKERS)
+simple: $(OUTPUT)
+	./$(OUTPUT) 1 1 < ./tests/simple_input.txt
 
-# simple: $(OUTPUT)
-# ./$(OUTPUT) tests/simple_input.txt $(NUM_WORKERS)
 
 clean:
 	rm $(OUTPUT)
