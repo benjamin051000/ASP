@@ -1,1 +1,1 @@
-(0000,P,history        ),(0001,C,cosmetics      ),(0022,S,entertainment  )
+(0000,P,history        ),(0001,C,cosmetics      ),(0022,S,entertainment  ),(0000,L,sports         )
