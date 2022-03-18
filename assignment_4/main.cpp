@@ -176,10 +176,10 @@ void mapper(const std::vector<string> &tokens,
     DP("[m] ID " << action.id << " mapped to index " << index)
 
     // Create score object to be shared with reducer process
-    mapped_data_t score; 
+    mapped_data_t score;
     strcpy(score.topic, action.topic.c_str());
-    score.score_adjustment = action_points.at(action.action);  // convert action to points
-    
+    score.score_adjustment =
+        action_points.at(action.action);  // convert action to points
 
     // Acquire lock
     pthread_mutex_lock(&shared_mem->locks[index]);
@@ -250,7 +250,6 @@ void dump_shared_mem(mapped_data_structure *shared_mem) {
   printf("----------dump_shared_mem() done----------\n");
 }
 
-
 //////////////////////////////////////////////////////
 
 /**
@@ -301,7 +300,8 @@ void reducer(mapped_data_structure *mapped_data, int id) {
 
   D(
       // Print resulting map
-      for (auto &e : total_scores) {
+      for (auto &e
+           : total_scores) {
         printf("[r %d] Total scores for id %d:\n", id, id);
         printf("[r %d]  Topic \"%s\": %d\n", id, e.first.c_str(), e.second);
       })
@@ -329,8 +329,8 @@ mapped_data_structure *mapped_mem_init() {
 
 /**
  * @brief fork() num_reducers times.
- * @param mapped_region 
- * @param num_reducers 
+ * @param mapped_region
+ * @param num_reducers
  */
 void fork_it_up(mapped_data_structure *mapped_region, int num_reducers) {
   for (int i = 0; i < num_reducers; i++) {
@@ -342,7 +342,7 @@ void fork_it_up(mapped_data_structure *mapped_region, int num_reducers) {
     } else if (result == 0) {
       // Child process
       reducer(mapped_region, i);  // Run the reducer.
-      exit(EXIT_SUCCESS);  // Exit this process
+      exit(EXIT_SUCCESS);         // Exit this process
     }
   }
 
