@@ -35,7 +35,7 @@ using score_t = int;
  * Mapper will send this info to the reducer designated for this action's ID.
  */
 struct mapped_data_t {
-  topic_t topic; // TODO convert to char[]
+  char topic[50];
   score_t score_adjustment;
   bool done = false;
 };
@@ -176,10 +176,10 @@ void mapper(const std::vector<string> &tokens,
     DP("[m] ID " << action.id << " mapped to index " << index)
 
     // Create score object to be shared with reducer process
-    const auto score = mapped_data_t{
-        action.topic,
-        action_points.at(action.action)  // convert action to points
-    };
+    mapped_data_t score; 
+    strcpy(score.topic, action.topic.c_str());
+    score.score_adjustment = action_points.at(action.action);  // convert action to points
+    
 
     // Acquire lock
     pthread_mutex_lock(&shared_mem->locks[index]);
@@ -288,7 +288,7 @@ void reducer(mapped_data_structure *mapped_data, int id) {
       break;
     }
 
-    DP("[r " << id << "] Updating topic " << val.topic << "...")
+    DP("[r " << id << "] Updating topic \"" << val.topic << "\"...")
 
     // This is okay, since operator[] will construct a default value if it
     // doesn't exist. Nice!
