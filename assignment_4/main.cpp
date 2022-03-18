@@ -145,7 +145,7 @@ std::vector<input_data_t> parse_actions(const std::vector<string> &tokens) {
  */
 void mapper(const std::vector<string> &tokens,
             mapped_data_structure *shared_mem) {
-  DP("----------mapper()----------")
+  DP("[m] Starting mapper...")
 
   // Used to convert user ID to an index, in the mmapped array.
   static std::vector<userid_t> id_index;
@@ -175,16 +175,20 @@ void mapper(const std::vector<string> &tokens,
 
     DP("[m] ID " << action.id << " mapped to index " << index)
 
+    // Acquire lock
+    pthread_mutex_lock(&shared_mem->locks[index]);
+    DP("[m] acquired lock.")
+
     // Create score object to be shared with reducer process
     mapped_data_t score;
     strcpy(score.topic, action.topic.c_str());
+    
+    DP("[m]\taction.topic=\"" << action.topic.c_str() << "\", score.topic=\"" << score.topic << "\"")
+
     score.score_adjustment =
         action_points.at(action.action);  // convert action to points
 
-    // Acquire lock
-    pthread_mutex_lock(&shared_mem->locks[index]);
-    DP("[m] acquired lock. Pushing new data into the queue now...")
-    // Send to mapped region
+    
     // Get current size
 
     int size;
@@ -192,13 +196,15 @@ void mapper(const std::vector<string> &tokens,
 
     shared_mem->data[index][size] = score;
 
+    DP("[m] Placed new data at index " << size)
+
     sem_post(&shared_mem->sizes[index]);
 
     // Release lock
     pthread_mutex_unlock(&shared_mem->locks[index]);
     DP("[m] released lock.")
   }
-#if 0
+
     // All data has been sent to all reducers.
     // Now, append a "done" signal to each reducer queue.
     DP("id_index.size()= " << id_index.size())
@@ -223,8 +229,8 @@ void mapper(const std::vector<string> &tokens,
         pthread_mutex_unlock(&shared_mem->locks[i]);
         DP("[m] Sent \"done\" to reducer " << i)
     }
-#endif
-  DP("----------done with mapper()----------")
+
+    DP("[m] Done. Goodbye.")
 }
 
 /**
@@ -265,13 +271,16 @@ void reducer(mapped_data_structure *mapped_data, int id) {
   std::unordered_map<topic_t, score_t>
       total_scores;  // topic -> total score for this ID
 
-  int i = 0;
 
   while (true) {
     DP("[r " << id << "] waiting for size sem...")
 
     // Wait for data to appear in the queue.
     sem_wait(&mapped_data->sizes[id]);
+    
+    // Get the last element in the queue
+    int size;
+    sem_getvalue(&mapped_data->sizes[id], &size);
 
     DP("[r " << id << "] Got sem. Waiting for lock...")
     // for(unsigned i = 0; i < size; i++) {
@@ -280,11 +289,11 @@ void reducer(mapped_data_structure *mapped_data, int id) {
     DP("[r " << id << "] Got lock.")
 
     // Now, read the data.
-    auto val = mapped_data->data[id][i];
+    auto val = mapped_data->data[id][size];
 
     if (val.done) {
-      DP("Reducer for id " << id << " done. Goodbye.")
-      break;
+        DP("[r " << id << "] Received done signal from mapper.")
+        break; 
     }
 
     DP("[r " << id << "] Updating topic \"" << val.topic << "\"...")
@@ -295,8 +304,7 @@ void reducer(mapped_data_structure *mapped_data, int id) {
 
     pthread_mutex_unlock(&mapped_data->locks[id]);  // Release lock
 
-    i++;
-  }
+  } // end of while(true)
 
   D(
       // Print resulting map
@@ -305,6 +313,8 @@ void reducer(mapped_data_structure *mapped_data, int id) {
         printf("[r %d] Total scores for id %d:\n", id, id);
         printf("[r %d]  Topic \"%s\": %d\n", id, e.first.c_str(), e.second);
       })
+
+    DP("[r " << id << "] Done. Goodbye.")
 }
 
 /**
@@ -381,7 +391,7 @@ int main(int argc, char *argv[]) {
   // Now that all the reducers are spun up, run the mapper.
   mapper(tokens, mapped_region);
 
-  // D(dump_shared_mem(mapped_region);)
+  D(dump_shared_mem(mapped_region);)
 
   DP("Waiting for reducer procs to finish...")
 
