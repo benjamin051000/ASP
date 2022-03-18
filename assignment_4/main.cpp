@@ -173,33 +173,29 @@ void mapper(const std::vector<string> &tokens,
       index = std::distance(id_index.begin(), iter);
     }
 
-    DP("[m] ID " << action.id << " mapped to index " << index)
-
     // Acquire lock
     pthread_mutex_lock(&shared_mem->locks[index]);
-    DP("[m] acquired lock.")
+    DP("[m] Acquired lock.")
 
     // Create score object to be shared with reducer process
     mapped_data_t score;
     strcpy(score.topic, action.topic.c_str());
     
-    DP("[m]\taction.topic=\"" << action.topic.c_str() << "\", score.topic=\"" << score.topic << "\"")
-
     score.score_adjustment =
         action_points.at(action.action);  // convert action to points
 
     
     // Get current size
-
     int size;
     sem_getvalue(&shared_mem->sizes[index], &size);
 
     shared_mem->data[index][size] = score;
 
-    DP("[m] Placed new data at index " << size)
-
+    // Increase size of this IPC so reducer knows it can take something off
     sem_post(&shared_mem->sizes[index]);
 
+    DP("[m] Sent index " << index << " data, new size = " << size+1) // size was just posted
+    
     // Release lock
     pthread_mutex_unlock(&shared_mem->locks[index]);
     DP("[m] released lock.")
@@ -207,8 +203,7 @@ void mapper(const std::vector<string> &tokens,
 
     // All data has been sent to all reducers.
     // Now, append a "done" signal to each reducer queue.
-    DP("id_index.size()= " << id_index.size())
-    for(int i = 0; i < id_index.size(); i++) {
+    for(unsigned i = 0; i < id_index.size(); i++) {
         pthread_mutex_lock(&shared_mem->locks[i]);
         
         int size;
@@ -305,12 +300,12 @@ void reducer(mapped_data_structure *mapped_data, int id) {
     pthread_mutex_unlock(&mapped_data->locks[id]);  // Release lock
 
   } // end of while(true)
-
+  
+  DP("r[ " << id << "] total_scores.size() = " << total_scores.size())
   D(
       // Print resulting map
       for (auto &e
            : total_scores) {
-        printf("[r %d] Total scores for id %d:\n", id, id);
         printf("[r %d]  Topic \"%s\": %d\n", id, e.first.c_str(), e.second);
       })
 
