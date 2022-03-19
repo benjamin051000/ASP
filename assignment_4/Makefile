@@ -11,12 +11,15 @@ all: $(OUTPUT)
 $(OUTPUT): main.cpp
 	$(CC) $(CFLAGS) main.cpp
 
+# Primary way to run the project.
 run: $(OUTPUT)
 	./$(OUTPUT) $(BUF_SIZE) $(NUM_REDUCERS) < $(INPUT_DIR)/input.txt
 
+# A simpler input file for easier debugging.
 simple: $(OUTPUT)
 	./$(OUTPUT) $(BUF_SIZE) $(NUM_REDUCERS) < $(INPUT_DIR)/simple_input.txt
 
+# Use diff to compare expected output with actual output.
 test: SHELL:=/bin/bash   # Set the shell for test only
 test: $(OUTPUT)
 	@diff <(sort -n $(INPUT_DIR)/output.txt) <(make -s run | sort -n)
