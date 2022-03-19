@@ -15,6 +15,10 @@ run: $(OUTPUT)
 simple: $(OUTPUT)
 	./$(OUTPUT) 5 1 < ./tests/simple_input.txt
 
+test: SHELL:=/bin/bash   # Set the shell for test only
+test: $(OUTPUT)
+	@diff <(sort -n tests/output.txt) <(make -s run | sort -n)
+	@echo Done.
 
 clean:
 	rm $(OUTPUT)

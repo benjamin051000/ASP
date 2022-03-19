@@ -19,7 +19,7 @@ using userid_t = string;
 using topic_t = string;
 using score_t = int;
 
-#define _DEBUG
+// #define _DEBUG
 
 #ifdef _DEBUG
 // Used for debug operations
@@ -84,7 +84,7 @@ public:
          * @brief Write to the back of the queue.
          * @param data mapped_action obj to write.
          */
-        void write(mapped_action data) { // TODO include buf_size here?
+        void write(mapped_action data) {
             sem_wait(&lock);
             
             int curr_size;
@@ -114,7 +114,21 @@ public:
          * @return mapped_action 
          */
         mapped_action read() {
+            sem_wait(&size);
+            sem_wait(&lock);
 
+            auto data = *head;
+
+            // Incremenet head pointer
+            if(head == &this->data[MAX_SIZE-1])
+                head = &this->data[0];
+            else
+                head++;
+
+            sem_post(&lock);
+            
+            // Return a copy (since this slot may be overwritten now)
+            return data;
         }
     };  // end of queue
 
@@ -204,6 +218,8 @@ std::vector<input_data_t> parse_actions(const std::vector<string> &tokens) {
     return actions;
 }
 
+void fork_it_up(shared_region_t *mapped_region, int index);
+
 /**
  * @brief Mapper process
  * @param tokens vector of strings from stdin.
@@ -218,7 +234,7 @@ void mapper(const std::vector<string> &tokens, shared_region_t *shared_mem) {
     const auto actions = parse_actions(tokens);
 
     // Map that coorelates an action to its cooresponding point value.
-    const std::unordered_map<string, score_t> action_points{
+    const unordered_map<string, score_t> action_points{
         {"P", 50}, {"L", 20}, {"D", -10}, {"C", 30}, {"S", 40}};
 
     // Next, send the mapped data to the reducer, action by action.
@@ -239,7 +255,11 @@ void mapper(const std::vector<string> &tokens, shared_region_t *shared_mem) {
             );
             
             index = shared_mem->userids_size++;
-            // TODO fork() here for dynamic num_reducers.
+            
+            // Make a new reducer process to handle this data.
+            DP("[m] Forking...")
+            fork_it_up(shared_mem, index);
+
         } else {
             // Get the index this element is at in the vector.
             index = std::distance(shared_mem->userids.begin(), iter);
@@ -259,9 +279,7 @@ void mapper(const std::vector<string> &tokens, shared_region_t *shared_mem) {
         // Write to queue.
         queue.write(score);
 
-        DP("[m] Sent index " << index << " data, new size = ")  // size was just posted
-
-        DP("[m] released lock.")
+        DP("[m] Sent index " << index << " data")
     }  // end of for(auto &action: actions)
 
     // All data has been sent to all reducers.
@@ -274,7 +292,7 @@ void mapper(const std::vector<string> &tokens, shared_region_t *shared_mem) {
             true
         });
         
-        DP("[m] Sent \"done\" to reducer " << i)
+        DP("[m] Sent \"done\" to reducer at index" << i)
     }
 
     DP("[m] Done. Goodbye.")
@@ -316,63 +334,42 @@ void dump_shared_region(shared_region_t *shared_mem) {
  * @param id Which index of the data array (AKA ID)
  * this reducer should work on.
  */
-// void reducer(mapped_data_structure *mapped_data, int id) {
-//     DP("[r " << id << "] Reducer spun up with id " << id)
+void reducer(shared_region_t *shared_mem, int index) {
+    sem_wait(&shared_mem->userids_lock);
+    const auto userid = shared_mem->userids[index];
+    sem_post(&shared_mem->userids_lock);
 
-//     // id -> (topic -> total score) for this ID
-//     std::unordered_map<userid_t, std::unordered_map<topic_t, score_t>>
-//         total_scores;
+    DP("[r " << userid << "] Reducer spun up")
 
-//     int head = 0;
-//     while (true) {
-//         DP("[r " << id << "] waiting for size sem...")
+    // id -> (topic -> total score) for this ID
+    unordered_map<topic_t, score_t> total_scores;
 
-//         // Wait for data to appear in the queue.
-//         sem_wait(&mapped_data->sizes[id]);
+    auto& queue = shared_mem->queues[index];
 
-//         // Get the last element in the queue
-//         // int size;
-//         // sem_getvalue(&mapped_data->sizes[id], &size);
+    while(true) {
+        auto data = queue.read();
+        if(data.done) {
+            DP("[r " << userid << "] Received done from mapper.")
+            break;
+        }
+        
+        DP("[r " << userid << "] updating \"" << data.topic << "\"...")
+        
+        // This is okay, since operator[] will construct a default value if it
+        // doesn't exist. Nice!
+        total_scores[data.topic] += data.score_adjustment;
+    }
 
-//         DP("[r " << id << "] Got sem. Waiting for lock...")
-//         // for(unsigned i = 0; i < size; i++) {
-//         // Get a new value from shared mem.
-//         pthread_mutex_lock(&mapped_data->locks[id]);  // Acquire lock
-//         DP("[r " << id << "] Got lock.")
+    DP("r[ " << userid << "] total_scores.size() = " << total_scores.size())
 
-//         // Now, read the data.
-//         auto val = mapped_data->data[id][head++];
+    for (auto &pair : total_scores) {  // Loop through userids
+        auto topic = pair.first;
+        auto score = pair.second;
+        printf("(%s,%s,%d)\n", userid, topic.c_str(), score);
+    }
 
-//         if (val.done) {
-//             DP("[r " << id << "] Received done signal from mapper.")
-//             break;
-//         } else if (string(val.topic) == "") {
-//             DP("[r " << id << "] !!!Found a null string, skipping it.")
-//             pthread_mutex_unlock(&mapped_data->locks[id]);
-//             continue;
-//         }
-
-//         DP("[r " << id << "] Updating topic \"" << val.topic << "\"...")
-
-//         // This is okay, since operator[] will construct a default value if it
-//         // doesn't exist. Nice!
-//         total_scores[val.id][val.topic] += val.score_adjustment;
-
-//         pthread_mutex_unlock(&mapped_data->locks[id]);  // Release lock
-
-//     }  // end of while(true)
-
-//     DP("r[ " << id << "] total_scores.size() = " << total_scores.size())
-
-//     for (auto &id : total_scores) {  // Loop through userids
-//         auto userid = id.first;
-//         for (auto &t : id.second) {  // Loop through topics
-//             printf("(%s,%s,%d)\n", userid.c_str(), t.first.c_str(), t.second);
-//         }
-//     }
-
-//     DP("[r " << id << "] Done. Goodbye.")
-// }
+    DP("[r " << userid << "] Done. Goodbye.")
+}
 
 /**
  * @brief Initialize shared region.
@@ -395,26 +392,22 @@ shared_region_t *shared_region_init(int max_q_size) {
 }
 
 /**
- * @brief fork() num_reducers times.
+ * @brief fork() once.
  * @param mapped_region
- * @param num_reducers
  */
-// void fork_it_up(mapped_data_structure *mapped_region, int num_reducers) {
-//     for (int i = 0; i < num_reducers; i++) {
-//         auto result = fork();
+void fork_it_up(shared_region_t *mapped_region, int index) {
+    auto result = fork();
 
-//         if (result == -1) {
-//             printf("Error: fork() didn't work.\n");
-//             exit(EXIT_FAILURE);
-//         } else if (result == 0) {
-//             // Child process
-//             reducer(mapped_region, i);  // Run the reducer.
-//             exit(EXIT_SUCCESS);         // Exit this process
-//         }
-//     }
-
-//     // Parent process returns.
-// }
+    if (result == -1) {
+        printf("Error: fork() didn't work.\n");
+        exit(EXIT_FAILURE);
+    } else if (result == 0) {
+        // Child process
+        reducer(mapped_region, index); // Run the reducer.
+        exit(EXIT_SUCCESS); // Exit this process
+    }
+    // Parent process returns.
+}
 
 //////////////////////////////////////////////////////
 int main(int argc, char *argv[]) {
@@ -443,27 +436,26 @@ int main(int argc, char *argv[]) {
 
     D(dump_shared_region(shared_region);)
 
-    // fork_it_up(mapped_region, num_reducers);
 
-    // // Now that all the reducers are spun up, run the mapper.
+    // Now that all the reducers are spun up, run the mapper.
     mapper(tokens, shared_region);
 
     D(dump_shared_region(shared_region);)
 
-    // DP("Waiting for reducer procs to finish...")
+    DP("Waiting for reducer procs to finish...")
 
-    // for (int i = 0; i < num_reducers; i++) {
-    //     wait(NULL);
-    // }
+    for (int i = 0; i < num_reducers; i++) {
+        wait(NULL);
+    }
 
-    // // Destroy mutexes and semaphores.
-    // mapped_region->destroy();
+    // Destroy mutexes and semaphores.
+    shared_region->destroy();
 
-    // // Unmap shared memory
-    // if (munmap(mapped_region, sizeof(mapped_data_structure)) == -1) {
-    //     printf("Error: Problem unmapping memory.\n");
-    //     exit(EXIT_FAILURE);
-    // }
+    // Unmap shared memory
+    if (munmap(shared_region, sizeof(shared_region_t)) == -1) {
+        printf("Error: Problem unmapping memory.\n");
+        exit(EXIT_FAILURE);
+    }
 
     DP("Goodbye.")
 }
