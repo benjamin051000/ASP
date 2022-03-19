@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <vector>
 using std::string;
+using std::array;
 
 using userid_t = string;
 using topic_t = string;
@@ -34,54 +35,74 @@ using score_t = int;
  * @brief Tuple to hold score adjustments per topic for an ID.
  * Mapper will send this info to the reducer designated for this action's ID.
  */
-struct mapped_data_t {
+struct mapped_action {
   char topic[50];
   score_t score_adjustment;
   bool done = false;
 };
 
-/** mapped_data_structure
+/**
  * @brief Data structure the mmapped region will be cast to.
- * Use this as a convenience tool for accessing members
- * in the mmapped region.
+ * Use this to conveniently access members in the shared region.
  */
-struct mapped_data_structure {
-  static const size_t NUM_REDUCERS = 7;
-  static const size_t NUM_ENTRIES = 10;
+class mmapped_region_t {
+public:
+    /**
+     * @brief IPC Queue object.
+     */
+    class queue {
+        static const auto SEM_PSHARED = 1;
+    public:
+        
+        static const size_t NUM_ENTRIES = 10;
+        array<mapped_action, NUM_ENTRIES> data; // From mapper
+        sem_t lock, size;
+        mapped_action *head, tail; // Used to keep track of where mapper/reducer are in the queue.
 
-  // Matrix: 1st dim is ID, 2nd dim is array of data (basically a queue)
-  std::array<std::array<mapped_data_t, NUM_ENTRIES>, NUM_REDUCERS> data;
+        /**
+         * @brief Initialize queue for IPC.
+         */
+        void init() {
+            sem_init(&lock, SEM_PSHARED, 1); // Mutex
+            sem_init(&size, SEM_PSHARED, 0); // Size of queue
+        }
 
-  // Mutex locks for each R/W operation to the reducer queues.
-  std::array<pthread_mutex_t, NUM_REDUCERS> locks;
+        /**
+         * @brief Clean up queue.
+         */
+        void destroy() {
+            sem_destroy(&lock);
+            sem_destroy(&size);
+        }
+    }; // end of queue
 
-  // sizes keeps track of which index in the data[ID] queue is the end of it.
-  std::array<sem_t, NUM_REDUCERS> sizes;  // TODO do we also need heads?
+    static const size_t MAX_REDUCERS = 7;
+    array<queue, MAX_REDUCERS> queues;
 
-  int head = 0,
-      tail = 0;  // Used for indexing into the array // TODO what is this for?
+    /**
+     * @brief A convenient way for reducers to obtain their userid.
+     * Reducers have an index associated with them. userids[index] is
+     * their userid in string form.
+     * WARNING: Be sure to strcpy() into this array, 
+     * or it won't be saved in shared memory.
+     */
+    array<char[50], MAX_REDUCERS> userids;
 
-  pthread_mutexattr_t attr;  // Used for setting mutexes to process-share
-
-  void init() {
-    for (auto &l : locks) {
-      pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
-      pthread_mutex_init(&l, &attr);
+    /**
+     * @brief Initialize all IPC queues.
+     */
+    void init() {
+        for(auto &q: queues) q.init();
     }
-    for (auto &s : sizes) {
-      sem_init(&s, 1, 0);
-    }
-  }
 
-  void destroy() {
-    for (auto &l : locks) {
-      pthread_mutex_destroy(&l);
+    /**
+     * @brief Destory all queues.
+     */
+    void destroy() {
+        for(auto &q: queues) q.destroy();
     }
-    for (auto &s : sizes) {
-      sem_destroy(&s);
-    }
-  }
-};
+
+}; // end of mmapped_region_t
 
 /**
  * @brief Read a text file into a string buffer.
@@ -314,22 +335,27 @@ void reducer(mapped_data_structure *mapped_data, int id) {
 
 /**
  * @brief Initialize mmapp()ed region.
- * @return mapped_data_structure*
+ * @return mmapped_region_t*
  */
-mapped_data_structure *mapped_mem_init() {
-  auto *mapped_region = (mapped_data_structure *)mmap(
-      NULL, sizeof(mapped_data_structure), PROT_READ | PROT_WRITE,
-      MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+mmapped_region_t *mapped_mem_init() {
+    auto *shared_region = (mmapped_region_t *)mmap(
+        NULL, 
+        sizeof(mmapped_region_t),
+        PROT_READ | PROT_WRITE,
+        MAP_SHARED | MAP_ANONYMOUS, 
+        -1, 
+        0
+    );
+    
+    if (shared_region == MAP_FAILED) {
+        printf("Error: Couldn't map memory region.\n");
+        exit(EXIT_FAILURE);
+    }
 
-  if (mapped_region == MAP_FAILED) {
-    printf("Error: Couldn't map memory region.\n");
-    exit(EXIT_FAILURE);
-  }
+    // Initialize shared region.
+    shared_region->init();
 
-  // Initialize mapped region mutex locks and whatnot
-  mapped_region->init();
-
-  return mapped_region;
+    return shared_region;
 }
 
 /**
