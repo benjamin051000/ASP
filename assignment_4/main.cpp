@@ -55,7 +55,7 @@ public:
     class queue {
         int MAX_SIZE;
     public:
-        static const size_t NUM_ENTRIES = 10;
+        static const size_t NUM_ENTRIES = 100;
         array<mapped_action, NUM_ENTRIES> data;  // From mapper
         sem_t lock, size;
         // Used to keep track of valid data in the queue.
@@ -132,7 +132,7 @@ public:
         }
     };  // end of queue
 
-    static const size_t MAX_REDUCERS = 7;
+    static const size_t MAX_REDUCERS = 20;
     array<queue, MAX_REDUCERS> queues;
 
     /**
@@ -218,14 +218,14 @@ std::vector<input_data_t> parse_actions(const std::vector<string> &tokens) {
     return actions;
 }
 
-void fork_it_up(shared_region_t *mapped_region, int index);
+void fork_it_up(shared_region_t *mapped_region, int index, int num_reducers);
 
 /**
  * @brief Mapper process
  * @param tokens vector of strings from stdin.
  * @param shared_mem Pointer to shared region
  */
-void mapper(const std::vector<string> &tokens, shared_region_t *shared_mem) {
+void mapper(const std::vector<string> &tokens, shared_region_t *shared_mem, int num_reducers) {
     DP("[m] Starting mapper...")
 
     // Used to convert userid_t to an index, in the mmapped array.
@@ -258,7 +258,7 @@ void mapper(const std::vector<string> &tokens, shared_region_t *shared_mem) {
             
             // Make a new reducer process to handle this data.
             DP("[m] Forking...")
-            fork_it_up(shared_mem, index);
+            fork_it_up(shared_mem, index, num_reducers);
 
         } else {
             // Get the index this element is at in the vector.
@@ -395,8 +395,16 @@ shared_region_t *shared_region_init(int max_q_size) {
  * @brief fork() once.
  * @param mapped_region
  */
-void fork_it_up(shared_region_t *mapped_region, int index) {
+void fork_it_up(shared_region_t *mapped_region, int index, int num_reducers) {
+    static auto times_forked = 0;
+    
+    if(times_forked >= num_reducers) {
+        printf("ERROR: Ran out of processes! Run with a larger value of \"num_reducers\" to continue.\n");
+        exit(EXIT_FAILURE);
+    }
+
     auto result = fork();
+    times_forked++;
 
     if (result == -1) {
         printf("Error: fork() didn't work.\n");
@@ -438,7 +446,7 @@ int main(int argc, char *argv[]) {
 
 
     // Now that all the reducers are spun up, run the mapper.
-    mapper(tokens, shared_region);
+    mapper(tokens, shared_region, num_reducers);
 
     D(dump_shared_region(shared_region);)
 
