@@ -13,7 +13,7 @@ run: $(OUTPUT)
 	./$(OUTPUT) $(BUF_SIZE) $(NUM_REDUCERS) < ./tests/input.txt
 
 simple: $(OUTPUT)
-	./$(OUTPUT) 1 1 < ./tests/simple_input.txt
+	./$(OUTPUT) 5 1 < ./tests/simple_input.txt
 
 
 clean:
