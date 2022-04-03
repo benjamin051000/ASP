@@ -11,3 +11,5 @@ app:
 
 clean:
 	rm -rf *.o *.ko *.mod.* *.symvers *.order *~
+	rm .char_driver.*.cmd .Module.symvers.cmd .modules.order.cmd char_driver.mod
+	rm userapp
