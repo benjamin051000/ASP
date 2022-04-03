@@ -18,11 +18,11 @@ static unsigned count = 1;
 #define ASP_CLEAR_BUF _IOW(CDRV_IOC_MAGIC, 1, int)
 
 struct ASP_mycdrv {
-	struct cdev *dev;
+	struct cdev dev; // Char device structure (NOT a pointer)
 	char *ramdisk;
-	struct semaphore sem;
-    // Device number (major and minor)
-	int devNo;
+    struct semaphore sem; // Mutex
+	dev_t devNo; // Device number (major and minor)
+
 	// any other field you may want to add
 };
 struct ASP_mycdrv mycdrv;
@@ -53,45 +53,58 @@ static ssize_t mycdrv_read(struct file* file, char __user *buf, size_t lbuf, lof
 }
 
 static ssize_t mycdrv_write(struct file *file, const char __user * buf, size_t lbuf, loff_t * ppos) {
-    // int nbytes;
-	// if ((lbuf + *ppos) > ramdisk_size) {
-	// 	pr_info("trying to read past end of device,"
-	// 		"aborting because this is just a stub!\n");
-	// 	return 0;
-	// }
-	// nbytes = lbuf - copy_from_user(mycdrv.ramdisk + *ppos, buf, lbuf);
-	// *ppos += nbytes;
-    int nbytes = 102030;
+	if ((lbuf + *ppos) > ramdisk_size) {
+		pr_info("trying to read past end of device,"
+			"aborting because this is just a stub!\n");
+		return 0;
+	}
+	int nbytes = lbuf - copy_from_user(mycdrv.ramdisk + *ppos, buf, lbuf);
+	*ppos += nbytes;
     pr_info("\t[WRITE] nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
     return nbytes;
 }
 
-static const struct file_operations mycdrv_fops = {
-    .owner = THIS_MODULE,
-    .read = mycdrv_read,
-    .write = mycdrv_write,
-    .open = mycdrv_open,
-    .release = mycdrv_release,
-};
+static struct class * class;
+
 
 static int __init cdrv_init(void) {
     // Allocate space for the ramdisk.
     mycdrv.ramdisk = kmalloc(ramdisk_size, GFP_KERNEL);
     // Make device number
     mycdrv.devNo = MKDEV(420, 0);
-    register_chrdev_region(mycdrv.devNo, count, MYDEV_NAME);
+    // Register range of device numbers to this driver.
+    if(register_chrdev_region(mycdrv.devNo, count, MYDEV_NAME)) {
+        pr_err("Error: Couldn't register chrdev region.\n");
+        return 1;
+    }
+
+    const struct file_operations mycdrv_fops = {
+        .owner = THIS_MODULE,
+        .llseek = NULL,
+        .read = mycdrv_read,
+        .write = mycdrv_write,
+        // .ioctl = NULL,
+        .open = mycdrv_open,
+        .release = mycdrv_release,
+    };
 
     // Initialize cdev struct
-    mycdrv.dev = cdev_alloc();
-    cdev_init(mycdrv.dev, &mycdrv_fops);
-    cdev_add(mycdrv.dev, mycdrv.devNo, count);
+    mycdrv.dev.owner = THIS_MODULE; // https://static.lwn.net/images/pdf/LDD3/ch03.pdf pg 15 says to do this
+    cdev_init(&mycdrv.dev, &mycdrv_fops); // Initialize cdev
+    class = class_create(THIS_MODULE, "my_class");
+    device_create(class, NULL, mycdrv.devNo, NULL, "mycdrv%d", MINOR(mycdrv.devNo));
 
+    // Everything is set up. Add char device to system
+    cdev_add(&mycdrv.dev, mycdrv.devNo, count);
     pr_info("Registered lab 5 device!\n");
     return 0;
 }
 
 static void __exit cdrv_exit(void) {
-    cdev_del(mycdrv.dev);
+    cdev_del(&mycdrv.dev);
+    
+    device_destroy(class, mycdrv.devNo);
+    
     unregister_chrdev_region(mycdrv.devNo, count);
     pr_info("Unregistered lab 5 device.\n");
     kfree(mycdrv.ramdisk);
