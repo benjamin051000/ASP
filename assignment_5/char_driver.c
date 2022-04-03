@@ -71,12 +71,14 @@ static int __init cdrv_init(void) {
     // Allocate space for the ramdisk.
     mycdrv.ramdisk = kmalloc(ramdisk_size, GFP_KERNEL);
     // Make device number
-    mycdrv.devNo = MKDEV(420, 0);
+    // mycdrv.devNo = MKDEV(420, 0);
     // Register range of device numbers to this driver.
-    if(register_chrdev_region(mycdrv.devNo, count, MYDEV_NAME)) {
+    if(alloc_chrdev_region(&mycdrv.devNo, 0, 10, MYDEV_NAME)) {
         pr_err("Error: Couldn't register chrdev region.\n");
         return 1;
     }
+
+    pr_info("devNo allocated by kernel:%d\n", mycdrv.devNo);
 
     const struct file_operations mycdrv_fops = {
         .owner = THIS_MODULE,
@@ -90,7 +92,9 @@ static int __init cdrv_init(void) {
 
     // Initialize cdev struct
     mycdrv.dev.owner = THIS_MODULE; // https://static.lwn.net/images/pdf/LDD3/ch03.pdf pg 15 says to do this
-    cdev_init(&mycdrv.dev, &mycdrv_fops); // Initialize cdev
+    cdev_init(&mycdrv.dev, &mycdrv_fops);
+    
+    // Create a device.
     class = class_create(THIS_MODULE, "my_class");
     device_create(class, NULL, mycdrv.devNo, NULL, "mycdrv%d", MINOR(mycdrv.devNo));
 
@@ -104,6 +108,7 @@ static void __exit cdrv_exit(void) {
     cdev_del(&mycdrv.dev);
     
     device_destroy(class, mycdrv.devNo);
+    class_destroy(class);
     
     unregister_chrdev_region(mycdrv.devNo, count);
     pr_info("Unregistered lab 5 device.\n");
