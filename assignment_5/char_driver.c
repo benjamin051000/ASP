@@ -12,11 +12,11 @@
 
 //NUM_DEVICES defaults to 3 unless specified during insmod
 int NUM_DEVICES = 3;
+module_param(NUM_DEVICES, int, S_IRUGO);
 
 int asp_major = 0;
 int asp_minor = 0;
 
-module_param(NUM_DEVICES, int, S_IRUGO);
 
 struct ASP_mycdrv {
 	struct cdev dev; // Char device structure (NOT a pointer)
@@ -26,7 +26,6 @@ struct ASP_mycdrv {
 
 	// any other field you may want to add
 };
-struct ASP_mycdrv mycdrv; // TODO replace with array for multiple devs
 struct ASP_mycdrv* devices; // Heap-allocated array of devices.
 
 int mycdrv_open(struct inode* inode, struct file* file) {
@@ -55,7 +54,7 @@ ssize_t mycdrv_read(struct file* file, char __user *buf, size_t lbuf, loff_t * p
 			"aborting because this is just a stub!\n");
 		return 0;
 	}
-	nbytes = lbuf - copy_to_user(buf, mycdrv.ramdisk + *ppos, lbuf);
+	// nbytes = lbuf - copy_to_user(buf, mycdrv.ramdisk + *ppos, lbuf);
 	*ppos += nbytes;
 	
     pr_info("\tREAD: nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
@@ -69,7 +68,7 @@ ssize_t mycdrv_write(struct file *file, const char __user * buf, size_t lbuf, lo
 			"aborting because this is just a stub!\n");
 		return 0;
 	}
-	nbytes = lbuf - copy_from_user(mycdrv.ramdisk + *ppos, buf, lbuf);
+	// nbytes = lbuf - copy_from_user(mycdrv.ramdisk + *ppos, buf, lbuf);
 	*ppos += nbytes;
     pr_info("\t[WRITE] nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
     return nbytes;
@@ -90,7 +89,7 @@ int __init cdrv_init(void) {
     };
 
     // Allocate space for the ramdisk.
-    mycdrv.ramdisk = kmalloc(ramdisk_size, GFP_KERNEL);
+    // mycdrv.ramdisk = kmalloc(ramdisk_size, GFP_KERNEL);
     // Register range of device numbers to this driver.
     dev_t devNo;
     int error = alloc_chrdev_region(&devNo, 0, NUM_DEVICES, MYDEV_NAME);
@@ -100,7 +99,7 @@ int __init cdrv_init(void) {
     }
     asp_major = MAJOR(devNo);
 
-    pr_info("devNo allocated by kernel: [%d, %d]\n", MAJOR(mycdrv.devNo), MINOR(mycdrv.devNo));
+    pr_info("Major number (from kernel) = %d\n", asp_major);
 
     // Allocate devices on the heap.
     devices = kmalloc(NUM_DEVICES*sizeof(struct ASP_mycdrv), GFP_KERNEL);
@@ -114,7 +113,8 @@ int __init cdrv_init(void) {
     class = class_create(THIS_MODULE, "lab5class");
     
     // Initialize device cdev structs.
-    for(int i = 0; i < NUM_DEVICES; i++) {
+    int i;
+    for(i = 0; i < NUM_DEVICES; i++) {
         struct ASP_mycdrv* device = &devices[i]; // Reference to current device
         sema_init(&device->sem, 1); // Initialize semaphore
         
@@ -130,7 +130,7 @@ int __init cdrv_init(void) {
         int err = cdev_add(&device->dev, device->devNo, 1);
         
         if(err) pr_warn("Error %d adding mycdrv%d\n", err, i);
-        else pr_info("Device mycdrv%d created.\n", i);
+        else pr_info("Device \"mycdrv%d\" created.\n", i);
     }
 
     // Everything is set up. Add char device to system
@@ -139,7 +139,8 @@ int __init cdrv_init(void) {
 }
 
 void __exit cdrv_exit(void) {
-    for(int i = 0; i < NUM_DEVICES; i++) {
+    int i;
+    for(i = 0; i < NUM_DEVICES; i++) {
         struct ASP_mycdrv* device = &devices[i]; // Reference to current device
         
         kfree(device->ramdisk);
