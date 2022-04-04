@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
+#include <errno.h>
 
 #define DEVICE "/dev/mycdrv"
 
@@ -28,6 +29,7 @@ int main(int argc, char *argv[]) {
 	if(fd == -1) {
 		printf("File %s either does not exist or has been locked by another "
 				"process\n", DEVICE);
+		printf("Errno: %d\n", errno);
 		exit(-1);
 	}
 
