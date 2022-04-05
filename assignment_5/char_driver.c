@@ -87,8 +87,6 @@ int __init cdrv_init(void) {
         .release = mycdrv_release,
     };
 
-    // Allocate space for the ramdisk.
-    // mycdrv.ramdisk = kmalloc(ramdisk_size, GFP_KERNEL);
     // Register range of device numbers to this driver.
     dev_t devNo;
     int error = alloc_chrdev_region(&devNo, 0, NUM_DEVICES, MYDEV_NAME);
@@ -151,11 +149,11 @@ void __exit cdrv_exit(void) {
         struct ASP_mycdrv* device = &devices[i]; // Reference to current device
         
         kfree(device->ramdisk);
-        device_destroy(class, device->devNo);
         cdev_del(&device->cdev);
+        device_destroy(class, device->devNo);
     }
 
-    // device_destroy(class, mycdrv.devNo);
+    class_unregister(class);
     class_destroy(class);
     
     unregister_chrdev_region(MKDEV(asp_major, asp_minor), NUM_DEVICES);
