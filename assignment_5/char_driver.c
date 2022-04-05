@@ -124,15 +124,11 @@ int __init cdrv_init(void) {
         device->ramdisk = kmalloc(ramdisk_size, GFP_KERNEL);
         memset(device->ramdisk, 0, ramdisk_size); // Reset ramdisk space
         
+        // Make the device node.
+        device_create(class, NULL, device->devNo, NULL, "mycdrv%d", MINOR(device->devNo)); // TODO do I need to save this value for anything?
+
         // Add cdev to the system.
         int err = cdev_add(&device->cdev, device->devNo, 1);
-        
-        if(err) {
-            pr_err("ERROR: couldn't add cdev for device. Error code %d\n", err);
-        }
-
-        // Finally, make the device node.
-        device_create(class, NULL, device->devNo, NULL, "mycdrv%d", MINOR(device->devNo)); // TODO do I need to save this value for anything?
         
         if(err) pr_warn("Error %d adding mycdrv%d\n", err, i);
         else pr_info("Device \"mycdrv%d\" created.\n", i);
