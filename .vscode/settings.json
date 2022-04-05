@@ -11,6 +11,9 @@
         "array": "cpp",
         "ioctl.h": "c",
         "features.h": "c",
-        "fcntl.h": "c"
+        "fcntl.h": "c",
+        "fstream": "c",
+        "errno.h": "c",
+        "list.h": "c"
     }
 }
