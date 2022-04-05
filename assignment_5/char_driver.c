@@ -32,11 +32,14 @@ struct ASP_mycdrv* devices; // Heap-allocated array of devices.
 
 int mycdrv_open(struct inode* inode, struct file* file) {
     struct ASP_mycdrv* device; // Device information
+    pr_info("mycdrv_open()...\n");
     // Get device struct from inode.
     device = container_of(inode->i_cdev, struct ASP_mycdrv, cdev);
+    pr_info("\t got device object\n");
     file->private_data = device; // TODO what is this useful for?
+    pr_info("assigned private_data field to this device.\n");
 
-	pr_info("OPENING device: %s%d\n", MYDEV_NAME, MINOR(device->devNo));
+	pr_info("Opened device: %s%d\n", MYDEV_NAME, MINOR(device->devNo));
     return 0;
 }
 
@@ -123,7 +126,7 @@ int __init cdrv_init(void) {
         // Initialize device's ramdisk
         device->ramdisk = kmalloc(ramdisk_size, GFP_KERNEL);
         memset(device->ramdisk, 0, ramdisk_size); // Reset ramdisk space
-        
+
         // Make the device node.
         device_create(class, NULL, device->devNo, NULL, "mycdrv%d", MINOR(device->devNo)); // TODO do I need to save this value for anything?
 
@@ -141,11 +144,14 @@ int __init cdrv_init(void) {
 
 void __exit cdrv_exit(void) {
     int i;
+    pr_info("Unregistering char_driver...\n");
     for(i = 0; i < NUM_DEVICES; i++) {
         struct ASP_mycdrv* device = &devices[i]; // Reference to current device
-        
+        pr_info("freeing ramdisk...\n");
         kfree(device->ramdisk);
+        pr_info("deleting cdev...\n");
         cdev_del(&device->cdev);
+        pr_info("destroying device...\n");
         device_destroy(class, device->devNo);
     }
 
