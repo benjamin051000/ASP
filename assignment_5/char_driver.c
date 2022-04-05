@@ -17,9 +17,11 @@ module_param(NUM_DEVICES, int, S_IRUGO);
 int asp_major = 0;
 int asp_minor = 0;
 
+struct class * class;
+
 
 struct ASP_mycdrv {
-	struct cdev dev; // Char device structure (NOT a pointer)
+	struct cdev cdev; // Char device structure (NOT a pointer)
 	char *ramdisk;
     struct semaphore sem; // Mutex
 	dev_t devNo; // Device number (major and minor)
@@ -31,7 +33,7 @@ struct ASP_mycdrv* devices; // Heap-allocated array of devices.
 int mycdrv_open(struct inode* inode, struct file* file) {
     struct ASP_mycdrv* device; // Device information
     // Get device struct from inode.
-    device = container_of(inode->i_cdev, struct ASP_mycdrv, dev);
+    device = container_of(inode->i_cdev, struct ASP_mycdrv, cdev);
     file->private_data = device; // TODO what is this useful for?
 
 	pr_info("OPENING device: %s%d\n", MYDEV_NAME, MINOR(device->devNo));
@@ -41,7 +43,7 @@ int mycdrv_open(struct inode* inode, struct file* file) {
 int mycdrv_release(struct inode *inode, struct file *file) {
     struct ASP_mycdrv* device; // Device information
     // Get device struct from inode.
-    device = container_of(inode->i_cdev, struct ASP_mycdrv, dev);
+    device = container_of(inode->i_cdev, struct ASP_mycdrv, cdev);
 
 	pr_info("CLOSING device: %s%d\n", MYDEV_NAME, MINOR(device->devNo));
 	return 0;
@@ -73,9 +75,6 @@ ssize_t mycdrv_write(struct file *file, const char __user * buf, size_t lbuf, lo
     pr_info("\t[WRITE] nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
     return nbytes;
 }
-
-struct class * class;
-
 
 int __init cdrv_init(void) {
     const struct file_operations mycdrv_fops = {
@@ -120,14 +119,22 @@ int __init cdrv_init(void) {
         
         // Initialize char device struct
         device->devNo = MKDEV(asp_major, asp_minor + i); // Set dev number
-        device->dev.owner = THIS_MODULE; // Set owner
-        device->dev.ops = &mycdrv_fops; // Set file ops (TODO could this be replaced with cdev_init()?)
-        device->ramdisk = kmalloc(ramdisk_size, GFP_KERNEL); // Init ramdisk
+        cdev_init(&device->cdev, &mycdrv_fops); // Initialize cdev, add fops
+        device->cdev.owner = THIS_MODULE; // Set owner (LDD3 says to do this)
+        
+        // Initialize device's ramdisk
+        device->ramdisk = kmalloc(ramdisk_size, GFP_KERNEL);
+        memset(device->ramdisk, 0, ramdisk_size); // Reset ramdisk space
+        
+        // Add cdev to the system.
+        int err = cdev_add(&device->cdev, device->devNo, 1);
+        
+        if(err) {
+            pr_err("ERROR: couldn't add cdev for device. Error code %d\n", err);
+        }
 
-        // Finally, make the device.
-        device_create(class, NULL, device->devNo, NULL, "mycdrv%d", MINOR(device->devNo));
-
-        int err = cdev_add(&device->dev, device->devNo, 1);
+        // Finally, make the device node.
+        device_create(class, NULL, device->devNo, NULL, "mycdrv%d", MINOR(device->devNo)); // TODO do I need to save this value for anything?
         
         if(err) pr_warn("Error %d adding mycdrv%d\n", err, i);
         else pr_info("Device \"mycdrv%d\" created.\n", i);
@@ -145,7 +152,7 @@ void __exit cdrv_exit(void) {
         
         kfree(device->ramdisk);
         device_destroy(class, device->devNo);
-        cdev_del(&device->dev);
+        cdev_del(&device->cdev);
     }
 
     // device_destroy(class, mycdrv.devNo);
