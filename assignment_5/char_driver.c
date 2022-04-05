@@ -153,6 +153,7 @@ void __exit cdrv_exit(void) {
     class_destroy(class);
     
     unregister_chrdev_region(MKDEV(asp_major, asp_minor), NUM_DEVICES);
+    kfree(devices);
     pr_info("Unregistered lab 5 module\n");
 }
 
