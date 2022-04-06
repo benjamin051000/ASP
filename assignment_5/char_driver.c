@@ -37,7 +37,7 @@ int mycdrv_open(struct inode* inode, struct file* file) {
     // Get device struct from inode.
     device = container_of(inode->i_cdev, struct ASP_mycdrv, cdev);
     pr_info("\t got device object\n");
-    file->private_data = device; // TODO what is this useful for?
+    file->private_data = device; // Other functions can use this to get the struct
     pr_info("assigned private_data field to this device.\n");
 
 	pr_info("Opened device: %s%d\n", MYDEV_NAME, MINOR(device->devNo));
@@ -54,39 +54,101 @@ int mycdrv_release(struct inode *inode, struct file *file) {
 }
 
 ssize_t mycdrv_read(struct file* file, char __user *buf, size_t lbuf, loff_t * ppos) {
+    struct ASP_mycdrv* device = file->private_data;
+
     int nbytes;
 	if ((lbuf + *ppos) > RAMDISK_SIZE) {
 		pr_info("trying to read past end of device,"
 			"aborting because this is just a stub!\n");
 		return 0;
 	}
-	// nbytes = lbuf - copy_to_user(buf, mycdrv.ramdisk + *ppos, lbuf);
+    if(down_interruptible(&device->sem)) {
+        return -ERESTARTSYS; // From LDD3
+    }
+
+	nbytes = lbuf - copy_to_user(buf, device->ramdisk + *ppos, lbuf);
 	*ppos += nbytes;
-	
+
+	up(&device->sem);
     pr_info("\tREAD: nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
     return nbytes;
 }
 
 ssize_t mycdrv_write(struct file *file, const char __user * buf, size_t lbuf, loff_t * ppos) {
+    struct ASP_mycdrv* device = file->private_data;
+    
     int nbytes;
 	if ((lbuf + *ppos) > RAMDISK_SIZE) {
 		pr_info("trying to read past end of device,"
 			"aborting because this is just a stub!\n");
 		return 0;
 	}
-	// nbytes = lbuf - copy_from_user(mycdrv.ramdisk + *ppos, buf, lbuf);
+    if(down_interruptible(&device->sem)) {
+        return -ERESTARTSYS; // From LDD3
+    }
+
+	nbytes = lbuf - copy_from_user(device->ramdisk + *ppos, buf, lbuf);
 	*ppos += nbytes;
+
+    up(&device->sem);
     pr_info("\t[WRITE] nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
     return nbytes;
 }
 
+loff_t mycdrv_llseek(struct file* file, loff_t offset, int origin) {
+    loff_t new_pos;
+    struct ASP_mycdrv* device = file->private_data;
+    
+    if(down_interruptible(&device->sem)) {
+        return -ERESTARTSYS;
+    }
+
+    switch(origin) {
+        case SEEK_SET: new_pos = offset;
+        break;
+        case SEEK_CUR: new_pos = file->f_pos + offset;
+        break;
+        case SEEK_END: new_pos = RAMDISK_SIZE + offset;
+        break;
+        default:
+        return -EINVAL;
+    }
+
+    up(&device->sem);
+    return new_pos;
+}
+
+long mycdrv_ioctl(struct file* file, unsigned cmd, unsigned long arg) {
+    struct ASP_mycdrv* device = file->private_data;
+    
+    // Ensure  the magic number is correct
+    if(_IOC_TYPE(cmd) != CDRV_IOC_MAGIC) return -ENOTTY;
+
+    down_interruptible(&device->sem);
+
+    switch(cmd) {
+        case ASP_CLEAR_BUF:
+            pr_warn("Clearing device buffer...\n");
+            memset(device->ramdisk, 0, RAMDISK_SIZE);
+        break;
+        default:
+            pr_info("User specified invalid ioctl command.\n");
+            return 1; // Errors
+    }
+    
+    up(&device->sem);
+
+    return 0; // No errors
+}
+
+
 void setup_device(struct ASP_mycdrv* device, int index) {
     const struct file_operations fops = {
         .owner = THIS_MODULE,
-        // .llseek = NULL,
+        .llseek = mycdrv_llseek,
         .read = mycdrv_read,
         .write = mycdrv_write,
-        // .ioctl = NULL,
+        .unlocked_ioctl = mycdrv_ioctl,
         .open = mycdrv_open,
         .release = mycdrv_release,
     };
@@ -105,9 +167,10 @@ void setup_device(struct ASP_mycdrv* device, int index) {
 
 int __init cdrv_init(void) {
     int i, err;
-    
-    // Register range of device numbers to this driver.
     dev_t devNo;
+    struct ASP_mycdrv* device;
+
+    // Register range of device numbers to this driver.
     err = alloc_chrdev_region(&devNo, 0, NUM_DEVICES, MYDEV_NAME);
     if(err < 0) {
         pr_err("Error: Couldn't register chrdev region.\n");
@@ -130,7 +193,7 @@ int __init cdrv_init(void) {
     
     // Initialize device cdev structs.
     for(i = 0; i < NUM_DEVICES; i++) {
-        struct ASP_mycdrv* device = &devices[i]; // Reference to current device
+        device = &devices[i]; // Reference to current device
         setup_device(device, i);
     }
 
@@ -141,10 +204,11 @@ int __init cdrv_init(void) {
 
 void __exit cdrv_exit(void) {
     int i;
+    struct ASP_mycdrv* device;
     pr_info("Removing char_driver...\n");
 
     for(i = 0; i < NUM_DEVICES; i++) {
-        struct ASP_mycdrv* device = &devices[i]; // Reference to current device
+        device = &devices[i]; // Reference to current device
         pr_info("Cleaning device %d\n", i);
 
         pr_info("\tfreeing ramdisk...\n");
@@ -163,12 +227,12 @@ void __exit cdrv_exit(void) {
     pr_info("destroying class\n");
     class_destroy(device_class);
     
-    pr_info("unregistering chrdev region\n"); 
-    unregister_chrdev_region(MKDEV(asp_major, asp_minor), NUM_DEVICES);
-    
     pr_info("freeing devices array\n");
     kfree(devices);
     
+    pr_info("unregistering chrdev region\n"); 
+    unregister_chrdev_region(MKDEV(asp_major, asp_minor), NUM_DEVICES);
+
     pr_info("Unregistered lab 5 module\n");
 }
 
