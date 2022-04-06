@@ -6,7 +6,7 @@
 #include <linux/cdev.h>		/* cdev utilities */
 
 #define MYDEV_NAME "mycdev"
-#define ramdisk_size (size_t) (16 * PAGE_SIZE) // ramdisk size 
+#define RAMDISK_SIZE (size_t) (16 * PAGE_SIZE) // ramdisk size 
 #define CDRV_IOC_MAGIC 'Z'
 #define ASP_CLEAR_BUF _IOW(CDRV_IOC_MAGIC, 1, int)
 
@@ -23,6 +23,7 @@ struct class * device_class;
 struct ASP_mycdrv {
 	struct cdev cdev; // Char device structure (NOT a pointer)
 	char *ramdisk;
+    size_t ramdisk_size;
     struct semaphore sem; // Mutex
 	dev_t devNo; // Device number (major and minor)
 
@@ -54,7 +55,7 @@ int mycdrv_release(struct inode *inode, struct file *file) {
 
 ssize_t mycdrv_read(struct file* file, char __user *buf, size_t lbuf, loff_t * ppos) {
     int nbytes;
-	if ((lbuf + *ppos) > ramdisk_size) {
+	if ((lbuf + *ppos) > RAMDISK_SIZE) {
 		pr_info("trying to read past end of device,"
 			"aborting because this is just a stub!\n");
 		return 0;
@@ -68,7 +69,7 @@ ssize_t mycdrv_read(struct file* file, char __user *buf, size_t lbuf, loff_t * p
 
 ssize_t mycdrv_write(struct file *file, const char __user * buf, size_t lbuf, loff_t * ppos) {
     int nbytes;
-	if ((lbuf + *ppos) > ramdisk_size) {
+	if ((lbuf + *ppos) > RAMDISK_SIZE) {
 		pr_info("trying to read past end of device,"
 			"aborting because this is just a stub!\n");
 		return 0;
@@ -91,10 +92,10 @@ void setup_device(struct ASP_mycdrv* device, int index) {
     };
 
     sema_init(&device->sem, 1);
-    device->devNo = MKDEV(asp_major, asp_minor + index);
+    device->devNo = MKDEV(asp_major, asp_minor + index); // Device stores its own id
     device->cdev.owner = THIS_MODULE;
     cdev_init(&device->cdev, &fops);
-    device->ramdisk = kzalloc(ramdisk_size, GFP_KERNEL);
+    device->ramdisk = kzalloc(RAMDISK_SIZE, GFP_KERNEL); // kzalloc = kmalloc + memset(0). Nice.
 
     cdev_add(&device->cdev, device->devNo, 1);
     device_create(device_class, NULL, device->devNo, NULL, "%s%d", MYDEV_NAME, index);
@@ -105,11 +106,10 @@ void setup_device(struct ASP_mycdrv* device, int index) {
 int __init cdrv_init(void) {
     int i, err;
     
-
     // Register range of device numbers to this driver.
     dev_t devNo;
-    int error = alloc_chrdev_region(&devNo, 0, NUM_DEVICES, MYDEV_NAME);
-    if(error < 0) {
+    err = alloc_chrdev_region(&devNo, 0, NUM_DEVICES, MYDEV_NAME);
+    if(err < 0) {
         pr_err("Error: Couldn't register chrdev region.\n");
         return 1;
     }
