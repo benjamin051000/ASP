@@ -5,7 +5,7 @@
 #include <linux/slab.h>		/* kmalloc */
 #include <linux/cdev.h>		/* cdev utilities */
 
-#define MYDEV_NAME "mycdrv"
+#define MYDEV_NAME "mycdev"
 #define ramdisk_size (size_t) (16 * PAGE_SIZE) // ramdisk size 
 #define CDRV_IOC_MAGIC 'Z'
 #define ASP_CLEAR_BUF _IOW(CDRV_IOC_MAGIC, 1, int)
@@ -17,7 +17,7 @@ module_param(NUM_DEVICES, int, S_IRUGO);
 int asp_major = 0;
 int asp_minor = 0;
 
-struct class * class;
+struct class * device_class;
 
 
 struct ASP_mycdrv {
@@ -79,8 +79,8 @@ ssize_t mycdrv_write(struct file *file, const char __user * buf, size_t lbuf, lo
     return nbytes;
 }
 
-int __init cdrv_init(void) {
-    const struct file_operations mycdrv_fops = {
+void setup_device(struct ASP_mycdrv* device, int index) {
+    const struct file_operations fops = {
         .owner = THIS_MODULE,
         // .llseek = NULL,
         .read = mycdrv_read,
@@ -89,6 +89,22 @@ int __init cdrv_init(void) {
         .open = mycdrv_open,
         .release = mycdrv_release,
     };
+
+    sema_init(&device->sem, 1);
+    device->devNo = MKDEV(asp_major, asp_minor + index);
+    device->cdev.owner = THIS_MODULE;
+    cdev_init(&device->cdev, &fops);
+    device->ramdisk = kzalloc(ramdisk_size, GFP_KERNEL);
+
+    cdev_add(&device->cdev, device->devNo, 1);
+    device_create(device_class, NULL, device->devNo, NULL, "%s%d", MYDEV_NAME, index);
+    
+    pr_info("setup_device: Device \"%s%d\" created.\n", MYDEV_NAME, index);
+}
+
+int __init cdrv_init(void) {
+    int i, err;
+    
 
     // Register range of device numbers to this driver.
     dev_t devNo;
@@ -104,37 +120,18 @@ int __init cdrv_init(void) {
     // Allocate devices on the heap.
     devices = kmalloc(NUM_DEVICES*sizeof(struct ASP_mycdrv), GFP_KERNEL);
 
-    // if(!devices) {
-    //     // TODO error handle
-    // }
+    if(!devices) {
+        pr_err("ERROR: Couldn't allocate devices array.\n");
+    }
 
     memset(devices, 0, NUM_DEVICES*sizeof(struct ASP_mycdrv));
 
-    class = class_create(THIS_MODULE, "lab5class");
+    device_class = class_create(THIS_MODULE, "lab5class");
     
     // Initialize device cdev structs.
-    int i;
     for(i = 0; i < NUM_DEVICES; i++) {
         struct ASP_mycdrv* device = &devices[i]; // Reference to current device
-        sema_init(&device->sem, 1); // Initialize semaphore
-        
-        // Initialize char device struct
-        device->devNo = MKDEV(asp_major, asp_minor + i); // Set dev number
-        cdev_init(&device->cdev, &mycdrv_fops); // Initialize cdev, add fops
-        device->cdev.owner = THIS_MODULE; // Set owner (LDD3 says to do this)
-        
-        // Initialize device's ramdisk
-        device->ramdisk = kmalloc(ramdisk_size, GFP_KERNEL);
-        memset(device->ramdisk, 0, ramdisk_size); // Reset ramdisk space
-
-        // Make the device node.
-        device_create(class, NULL, device->devNo, NULL, "mycdrv%d", MINOR(device->devNo)); // TODO do I need to save this value for anything?
-
-        // Add cdev to the system.
-        int err = cdev_add(&device->cdev, device->devNo, 1);
-        
-        if(err) pr_warn("Error %d adding mycdrv%d\n", err, i);
-        else pr_info("Device \"mycdrv%d\" created.\n", i);
+        setup_device(device, i);
     }
 
     // Everything is set up. Add char device to system
@@ -144,22 +141,34 @@ int __init cdrv_init(void) {
 
 void __exit cdrv_exit(void) {
     int i;
-    pr_info("Unregistering char_driver...\n");
+    pr_info("Removing char_driver...\n");
+
     for(i = 0; i < NUM_DEVICES; i++) {
         struct ASP_mycdrv* device = &devices[i]; // Reference to current device
-        pr_info("freeing ramdisk...\n");
+        pr_info("Cleaning device %d\n", i);
+
+        pr_info("\tfreeing ramdisk...\n");
         kfree(device->ramdisk);
-        pr_info("deleting cdev...\n");
+        
+        pr_info("\tdeleting cdev...\n");
         cdev_del(&device->cdev);
-        pr_info("destroying device...\n");
-        device_destroy(class, device->devNo);
+
+        pr_info("\tdestroying device...\n");
+        device_destroy(device_class, device->devNo);
     }
 
-    class_unregister(class);
-    class_destroy(class);
+    // pr_info("unregistering class\n");
+    // class_unregister(device_class);
     
+    pr_info("destroying class\n");
+    class_destroy(device_class);
+    
+    pr_info("unregistering chrdev region\n"); 
     unregister_chrdev_region(MKDEV(asp_major, asp_minor), NUM_DEVICES);
+    
+    pr_info("freeing devices array\n");
     kfree(devices);
+    
     pr_info("Unregistered lab 5 module\n");
 }
 
