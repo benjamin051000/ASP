@@ -187,13 +187,13 @@ int __init cdrv_init(void) {
     pr_info("Major number (from kernel) = %d\n", asp_major);
 
     // Allocate devices on the heap.
-    devices = kmalloc(NUM_DEVICES*sizeof(struct ASP_mycdrv), GFP_KERNEL);
+    devices = kzalloc(NUM_DEVICES*sizeof(struct ASP_mycdrv), GFP_KERNEL);
 
     if(!devices) {
         pr_err("ERROR: Couldn't allocate devices array.\n");
     }
 
-    memset(devices, 0, NUM_DEVICES*sizeof(struct ASP_mycdrv));
+    // memset(devices, 0, NUM_DEVICES*sizeof(struct ASP_mycdrv));
 
     device_class = class_create(THIS_MODULE, "lab5class");
     
