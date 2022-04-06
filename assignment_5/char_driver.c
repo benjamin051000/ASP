@@ -14,8 +14,10 @@
 int NUM_DEVICES = 3;
 module_param(NUM_DEVICES, int, S_IRUGO);
 
+/**
+ * @brief Major number for devices in this module.
+ */
 int asp_major = 0;
-int asp_minor = 0;
 
 struct class * device_class;
 
@@ -102,17 +104,19 @@ loff_t mycdrv_llseek(struct file* file, loff_t offset, int origin) {
     if(down_interruptible(&device->sem)) {
         return -ERESTARTSYS;
     }
-
+    
     switch(origin) {
         case SEEK_SET: new_pos = offset;
         break;
         case SEEK_CUR: new_pos = file->f_pos + offset;
         break;
-        case SEEK_END: new_pos = RAMDISK_SIZE + offset;
+        case SEEK_END: new_pos = RAMDISK_SIZE + offset; // TODO wouldn't this go beyond ramdisk limit? Out of bounds? Segfault? :o
         break;
         default:
         return -EINVAL;
     }
+
+    // TODO ensure new_pos is actually valid
 
     up(&device->sem);
     return new_pos;
@@ -124,7 +128,9 @@ long mycdrv_ioctl(struct file* file, unsigned cmd, unsigned long arg) {
     // Ensure  the magic number is correct
     if(_IOC_TYPE(cmd) != CDRV_IOC_MAGIC) return -ENOTTY;
 
-    down_interruptible(&device->sem);
+    if(down_interruptible(&device->sem)) {
+        return -ERESTARTSYS;
+    }
 
     switch(cmd) {
         case ASP_CLEAR_BUF:
@@ -154,7 +160,7 @@ void setup_device(struct ASP_mycdrv* device, int index) {
     };
 
     sema_init(&device->sem, 1);
-    device->devNo = MKDEV(asp_major, asp_minor + index); // Device stores its own id
+    device->devNo = MKDEV(asp_major, index); // Device stores its own id
     device->cdev.owner = THIS_MODULE;
     cdev_init(&device->cdev, &fops);
     device->ramdisk = kzalloc(RAMDISK_SIZE, GFP_KERNEL); // kzalloc = kmalloc + memset(0). Nice.
@@ -231,7 +237,7 @@ void __exit cdrv_exit(void) {
     kfree(devices);
     
     pr_info("unregistering chrdev region\n"); 
-    unregister_chrdev_region(MKDEV(asp_major, asp_minor), NUM_DEVICES);
+    unregister_chrdev_region(MKDEV(asp_major, 0), NUM_DEVICES);
 
     pr_info("Unregistered lab 5 module\n");
 }
