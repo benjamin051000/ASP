@@ -11,7 +11,7 @@
 #define ASP_CLEAR_BUF _IOW(CDRV_IOC_MAGIC, 1, int)
 
 //NUM_DEVICES defaults to 3 unless specified during insmod
-int NUM_DEVICES = 3;
+int NUM_DEVICES = 1;
 module_param(NUM_DEVICES, int, S_IRUGO);
 
 /**
@@ -31,7 +31,8 @@ struct ASP_mycdrv {
 
 	// any other field you may want to add
 };
-struct ASP_mycdrv* devices; // Heap-allocated array of devices.
+// struct ASP_mycdrv* devices; // Heap-allocated array of devices.
+struct ASP_mycdrv device;
 
 int mycdrv_open(struct inode* inode, struct file* file) {
     struct ASP_mycdrv* device; // Device information
@@ -172,9 +173,9 @@ void setup_device(struct ASP_mycdrv* device, int index) {
 }
 
 int __init cdrv_init(void) {
-    int i, err;
+    int err;
     dev_t devNo;
-    struct ASP_mycdrv* device;
+    // struct ASP_mycdrv* device;
 
     // Register range of device numbers to this driver.
     err = alloc_chrdev_region(&devNo, 0, NUM_DEVICES, MYDEV_NAME);
@@ -187,21 +188,22 @@ int __init cdrv_init(void) {
     pr_info("Major number (from kernel) = %d\n", asp_major);
 
     // Allocate devices on the heap.
-    devices = kzalloc(NUM_DEVICES*sizeof(struct ASP_mycdrv), GFP_KERNEL);
+    // devices = kzalloc(NUM_DEVICES*sizeof(struct ASP_mycdrv), GFP_KERNEL);
 
-    if(!devices) {
-        pr_err("ERROR: Couldn't allocate devices array.\n");
-    }
+    // if(!devices) {
+    //     pr_err("ERROR: Couldn't allocate devices array.\n");
+    // }
 
     // memset(devices, 0, NUM_DEVICES*sizeof(struct ASP_mycdrv));
 
     device_class = class_create(THIS_MODULE, "lab5class");
     
     // Initialize device cdev structs.
-    for(i = 0; i < NUM_DEVICES; i++) {
-        device = &devices[i]; // Reference to current device
-        setup_device(device, i);
-    }
+    // for(i = 0; i < NUM_DEVICES; i++) {
+    //     device = &devices[i]; // Reference to current device
+    //     setup_device(device, i);
+    // }
+    setup_device(&device, 0);
 
     // Everything is set up. Add char device to system
     pr_info("Lab5 module initialized\n");
@@ -209,23 +211,22 @@ int __init cdrv_init(void) {
 }
 
 void __exit cdrv_exit(void) {
-    int i;
-    struct ASP_mycdrv* device;
+    // struct ASP_mycdrv* device;
     pr_info("Removing char_driver...\n");
 
-    for(i = 0; i < NUM_DEVICES; i++) {
-        device = &devices[i]; // Reference to current device
-        pr_info("Cleaning device %d\n", i);
+    // for(i = 0; i < NUM_DEVICES; i++) {
+        // device = &devices[i]; // Reference to current device
+        pr_info("Cleaning device \n");
 
         pr_info("\tfreeing ramdisk...\n");
-        kfree(device->ramdisk);
+        kfree(device.ramdisk);
         
         pr_info("\tdeleting cdev...\n");
-        cdev_del(&device->cdev);
+        cdev_del(&device.cdev);
 
         pr_info("\tdestroying device...\n");
-        device_destroy(device_class, device->devNo);
-    }
+        device_destroy(device_class, device.devNo);
+    // }
 
     // pr_info("unregistering class\n");
     // class_unregister(device_class);
@@ -234,7 +235,7 @@ void __exit cdrv_exit(void) {
     class_destroy(device_class);
     
     pr_info("freeing devices array\n");
-    kfree(devices);
+    // kfree(devices);
     
     pr_info("unregistering chrdev region\n"); 
     unregister_chrdev_region(MKDEV(asp_major, 0), NUM_DEVICES);
