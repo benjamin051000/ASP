@@ -228,9 +228,6 @@ void __exit cdrv_exit(void) {
         device_destroy(device_class, device.devNo);
     // }
 
-    // pr_info("unregistering class\n");
-    // class_unregister(device_class);
-    
     pr_info("destroying class\n");
     class_destroy(device_class);
     
