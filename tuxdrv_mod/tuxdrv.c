@@ -1,25 +1,3 @@
-/* **************** LDD:2.0 s_02/lab1_chrdrv.c **************** */
-/*
- * The code herein is: Copyright Jerry Cooperstein, 2012
- *
- * This Copyright is retained for the purpose of protecting free
- * redistribution of source.
- *
- *     URL:    http://www.coopj.com
- *     email:  coop@coopj.com
- *
- * The primary maintainer for this code is Jerry Cooperstein
- * The CONTRIBUTORS file (distributed with this
- * file) lists those known to have contributed to the source.
- *
- * This code is distributed under Version 2 of the GNU General Public
- * License, which you should have received with the source.
- *
- */
-/*
-Sample Character Driver
-@*/
-
 #include <linux/cdev.h>    /* cdev utilities */
 #include <linux/fs.h>      /* file_operations */
 #include <linux/init.h>    /* module_init, module_exit */
@@ -31,7 +9,7 @@ Sample Character Driver
 
 #define RAMDISK_SIZE (size_t)(16 * PAGE_SIZE)
 
-#define CLEAR_BUF _IOW('Z', 1, int)
+#define ASP_CLEAR_BUF _IOW('Z', 1, int)
 
 typedef struct {
 	struct cdev cdev; // cdev device struct
@@ -103,6 +81,7 @@ ssize_t mycdrv_write(struct file *file, const char __user *buf,
     return nbytes;
 }
 
+// TODO reset file position pointer to 0
 long mycdrv_ioctl(struct file *file, unsigned cmd, unsigned long arg) {
     // Ensure  the magic number is correct
     if (_IOC_TYPE(cmd) != 'Z') return -ENOTTY;
@@ -112,7 +91,7 @@ long mycdrv_ioctl(struct file *file, unsigned cmd, unsigned long arg) {
     }
 
     switch (cmd) {
-    case CLEAR_BUF:
+    case ASP_CLEAR_BUF:
         pr_info("tuxdrv: Clearing device buffer...\n");
         memset(device.ramdisk, 0, RAMDISK_SIZE);
         break;
@@ -127,6 +106,7 @@ long mycdrv_ioctl(struct file *file, unsigned cmd, unsigned long arg) {
     return 0;
 }
 
+// TODO In the case of a request that goes beyond end of the buffer, your implementation needs to expand the buffer and fill the new region with zeros.
 loff_t mycdrv_llseek(struct file *file, loff_t offset, int origin) {
     loff_t new_pos;
 
