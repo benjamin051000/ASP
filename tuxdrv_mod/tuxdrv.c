@@ -34,7 +34,6 @@ static char *ramdisk;
 
 static dev_t first;
 static unsigned int count = 1;
-static int my_major = 500, my_minor = 0;
 static struct cdev *my_cdev;
 
 struct class* device_class;
@@ -92,9 +91,17 @@ static const struct file_operations mycdrv_fops = {
 
 static int __init my_init(void)
 {
+	int err;
 	ramdisk = kmalloc(ramdisk_size, GFP_KERNEL);
-	first = MKDEV(my_major, my_minor);
-	register_chrdev_region(first, count, MYDEV_NAME);
+	err = alloc_chrdev_region(&first, 0, 1, MYDEV_NAME);
+
+	if(err < 0) {
+		pr_err("tuxdrv: Couldn't register chrdev region.\n");
+		return -1;
+	}
+
+	pr_info("tuxdrv: Major number assigned = %d\n", MAJOR(first));
+	
 	my_cdev = cdev_alloc();
 	cdev_init(my_cdev, &mycdrv_fops);
 	cdev_add(my_cdev, first, count);
