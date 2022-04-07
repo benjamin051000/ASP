@@ -31,7 +31,7 @@ module_param(NUM_DEVICES, int, S_IRUGO);
 typedef struct {
 	struct cdev cdev; // cdev device struct
 	char *ramdisk; // Data 
-	loff_t data_size; // Location of end of written data (0 to RAMDISK_SIZE)
+	loff_t eof; // Location of end of written data (0 to RAMDISK_SIZE)
 	struct semaphore sem;
 	
 	struct list_head list; // Linked list of devices
@@ -77,7 +77,7 @@ void tuxdrv_t_destroy(tuxdrv_t* device, struct class* deviceClass) {
     pr_notice("tuxdrv: removing device from linked list...\n");
     // Remove device from list
     // list_del(&device->list); // TODO BUG Does not appear to be working?
-    
+
     // Delete heap-allocated device
     pr_notice("tuxdrv: freeing device...\n");
     kfree(device);
@@ -88,14 +88,10 @@ void tuxdrv_t_destroy(tuxdrv_t* device, struct class* deviceClass) {
  */
 LIST_HEAD(devices);
 
-// tuxdrv_t device; // Module instance
-
-
 dev_t first;
 unsigned int count = 1;
 struct class *device_class;
 
-// TODO should the sem go down here and up in close()? What if multiple procs are modifying data on same device? Could this cause problems?
 int mycdrv_open(struct inode *inode, struct file *file) {
 	// Set file private data to the device for easy access in other functions.
 	tuxdrv_t* device = container_of(inode->i_cdev, tuxdrv_t, cdev);
@@ -155,14 +151,13 @@ ssize_t mycdrv_write(struct file *file, const char __user *buf,
     *ppos += nbytes;
     pr_info("tuxdrv: write(): nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
 
-    if (device->data_size < *ppos) device->data_size = *ppos;
+    if (device->eof < *ppos) device->eof = *ppos;
 
     up(&device->sem);
 
     return nbytes;
 }
 
-// TODO reset file position pointer to 0
 long mycdrv_ioctl(struct file *file, unsigned cmd, unsigned long arg) {
 	tuxdrv_t* device = file->private_data;
 
@@ -177,6 +172,8 @@ long mycdrv_ioctl(struct file *file, unsigned cmd, unsigned long arg) {
     case ASP_CLEAR_BUF:
         pr_info("tuxdrv: Clearing device buffer...\n");
         memset(device->ramdisk, 0, RAMDISK_SIZE);
+        file->f_pos = 0;
+        device->eof = 0;
         break;
     default:
         pr_err("tuxdrv: Invalid ioctl command.\n");
@@ -207,7 +204,7 @@ loff_t mycdrv_llseek(struct file *file, loff_t offset, int origin) {
         new_pos = file->f_pos + offset;
         break;
     case SEEK_END:
-        new_pos = device->data_size + offset;  // TODO is data_size the way to do this? It appears to pass the tests...
+        new_pos = device->eof + offset;
         break;
     default:
         up(&device->sem);
@@ -231,7 +228,7 @@ loff_t mycdrv_llseek(struct file *file, loff_t offset, int origin) {
 }
 
 int __init my_init(void) {
-    int err;
+    int err, i;
 
 	pr_info("tuxdrv: Number of devices: %d", NUM_DEVICES);
 
@@ -246,7 +243,11 @@ int __init my_init(void) {
 
     device_class = class_create(THIS_MODULE, "tuxdrv_cls");
     // device_create(device_class, NULL, first, NULL, "tux0");
-	tuxdrv_t_create(&devices, first, device_class);
+
+    for(i = 0; i < NUM_DEVICES; i++) {
+        dev_t d = MKDEV(MAJOR(first), i);
+	    tuxdrv_t_create(&devices, d, device_class);
+    }
 
 	pr_info("tuxdrv: Devices created:\n");
 	struct list_head* e_ptr;
