@@ -41,13 +41,13 @@ struct class* device_class;
 
 static int mycdrv_open(struct inode *inode, struct file *file)
 {
-	pr_info(" OPENING device: %s:\n\n", MYDEV_NAME);
+	pr_info("tuxdrv: OPENING device: %s:\n\n", MYDEV_NAME);
 	return 0;
 }
 
 static int mycdrv_release(struct inode *inode, struct file *file)
 {
-	pr_info(" CLOSING device: %s:\n\n", MYDEV_NAME);
+	pr_info("tuxdrv: CLOSING device: %s:\n\n", MYDEV_NAME);
 	return 0;
 }
 
@@ -62,7 +62,7 @@ mycdrv_read(struct file *file, char __user * buf, size_t lbuf, loff_t * ppos)
 	}
 	nbytes = lbuf - copy_to_user(buf, ramdisk + *ppos, lbuf);
 	*ppos += nbytes;
-	pr_info("\n READING function, nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
+	pr_info("tuxdrv: READING function, nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
 	return nbytes;
 }
 
@@ -78,7 +78,7 @@ mycdrv_write(struct file *file, const char __user * buf, size_t lbuf,
 	}
 	nbytes = lbuf - copy_from_user(ramdisk + *ppos, buf, lbuf);
 	*ppos += nbytes;
-	pr_info("\n WRITING function, nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
+	pr_info("tuxdrv: WRITING function, nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
 	return nbytes;
 }
 
@@ -99,7 +99,7 @@ static int __init my_init(void)
 	cdev_init(my_cdev, &mycdrv_fops);
 	cdev_add(my_cdev, first, count);
 //	pr_info("\nSucceeded in registering character device %s\n", MYDEV_NAME);
-	pr_info("\n Registered! Good job, Benjamin.\n");
+	pr_info("tuxdrv: Registered!\n");
 
 	device_class = class_create(THIS_MODULE, "tuxdrv_cls");
 	device_create(device_class, NULL, first, NULL, "tux0");
@@ -108,14 +108,24 @@ static int __init my_init(void)
 
 static void __exit my_exit(void)
 {
+	pr_info("tuxdrv: Deinitializing...\n");
+
+	pr_info("tuxdrv: \tDestroying device\n");
 	device_destroy(device_class, first);
-	class_unregister(device_class);
+
+	pr_info("tuxdrv: \tDestroying class\n");
 	class_destroy(device_class);
 
+	pr_info("tuxdrv: \tFreeing ramdisk\n");
 	kfree(ramdisk);
+
+	pr_info("tuxdrv: \tDeleting cdev\n");
 	cdev_del(my_cdev);
+
+	pr_info("tuxdrv: \tUnregistering chrdev region\n");
 	unregister_chrdev_region(first, count);
-	pr_info("\nUnregistered. Goodbye, Benjamin.\n");
+
+	pr_info("tuxdrv: Unregistered. Goodbye.\n");
 }
 
 module_init(my_init);
