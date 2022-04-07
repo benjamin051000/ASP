@@ -5,10 +5,8 @@
 #include <linux/slab.h>    /* kmalloc */
 #include <linux/uaccess.h> /* copy_(to,from)_user */
 
-#define MYDEV_NAME "mycdrv"
-
+#define MYDEV_NAME "tuxdrv"
 #define RAMDISK_SIZE (size_t)(16 * PAGE_SIZE)
-
 #define ASP_CLEAR_BUF _IOW('Z', 1, int)
 
 typedef struct {
