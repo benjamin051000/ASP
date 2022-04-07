@@ -4,10 +4,21 @@
 #include <linux/module.h>  /* for modules */
 #include <linux/slab.h>    /* kmalloc */
 #include <linux/uaccess.h> /* copy_(to,from)_user */
+#include <linux/list.h>    /* Linked list operations */
+
+MODULE_AUTHOR("Benjamin Wheeler");
+MODULE_LICENSE("GPL v2");
 
 #define MYDEV_NAME "tuxdrv"
 #define RAMDISK_SIZE (size_t)(16 * PAGE_SIZE)
 #define ASP_CLEAR_BUF _IOW('Z', 1, int)
+
+int mycdrv_open(struct inode *inode, struct file *file);
+int mycdrv_release(struct inode *inode, struct file *file);
+ssize_t mycdrv_read(struct file *file, char __user *buf, size_t lbuf, loff_t *ppos);
+ssize_t mycdrv_write(struct file *file, const char __user *buf, size_t lbuf, loff_t *ppos);
+long mycdrv_ioctl(struct file *file, unsigned cmd, unsigned long arg);
+loff_t mycdrv_llseek(struct file *file, loff_t offset, int origin);
 
 /**
  * @brief Specifies the number of devices that should be created on insmod.
@@ -19,140 +30,22 @@ module_param(NUM_DEVICES, int, S_IRUGO);
 
 typedef struct {
 	struct cdev cdev; // cdev device struct
-	dev_t dev_num; // Device number (major and minor)
 	char *ramdisk; // Data 
 	loff_t data_size; // Location of end of written data (0 to RAMDISK_SIZE)
 	struct semaphore sem;
+	
+	struct list_head list; // Linked list of devices
 } tuxdrv_t;
 
-tuxdrv_t device; // Module instance
-
-dev_t first;
-unsigned int count = 1;
-struct class *device_class;
-
-int mycdrv_open(struct inode *inode, struct file *file) {
-    pr_info("tuxdrv: open(): %s\n", MYDEV_NAME);
-    return 0;
-}
-
-int mycdrv_release(struct inode *inode, struct file *file) {
-    pr_info("tuxdrv: close(): %s\n", MYDEV_NAME);
-    return 0;
-}
-
-ssize_t mycdrv_read(struct file *file, char __user *buf, size_t lbuf,
-                           loff_t *ppos) {
-    int nbytes;
-    if ((lbuf + *ppos) > RAMDISK_SIZE) {
-        pr_info("trying to read past end of device,"
-                "aborting because this is just a stub!\n");
-        return 0;
-    }
-
-    if (down_interruptible(&device.sem)) {
-        return -ERESTARTSYS; // From LDD3
-    }
-
-    nbytes = lbuf - copy_to_user(buf, device.ramdisk + *ppos, lbuf);
-    *ppos += nbytes;
-    pr_info("tuxdrv: read(): nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
-
-    up(&device.sem);
-
-    return nbytes;
-}
-
-ssize_t mycdrv_write(struct file *file, const char __user *buf,
-                            size_t lbuf, loff_t *ppos) {
-    int nbytes;
-    if ((lbuf + *ppos) > RAMDISK_SIZE) {
-        pr_info("trying to read past end of device,"
-                "aborting because this is just a stub!\n");
-        return 0;
-    }
-
-    if (down_interruptible(&device.sem)) {
-        return -ERESTARTSYS; // From LDD3
-    }
-
-    nbytes = lbuf - copy_from_user(device.ramdisk + *ppos, buf, lbuf);
-    *ppos += nbytes;
-    pr_info("tuxdrv: write(): nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
-
-    if (device.data_size < *ppos) device.data_size = *ppos;
-
-    up(&device.sem);
-
-    return nbytes;
-}
-
-// TODO reset file position pointer to 0
-long mycdrv_ioctl(struct file *file, unsigned cmd, unsigned long arg) {
-    // Ensure  the magic number is correct
-    if (_IOC_TYPE(cmd) != 'Z') return -ENOTTY;
-
-    if (down_interruptible(&device.sem)) {
-        return -ERESTARTSYS; // From LDD3
-    }
-
-    switch (cmd) {
-    case ASP_CLEAR_BUF:
-        pr_info("tuxdrv: Clearing device buffer...\n");
-        memset(device.ramdisk, 0, RAMDISK_SIZE);
-        break;
-    default:
-        pr_err("tuxdrv: Invalid ioctl command.\n");
-        up(&device.sem);
-        return -1; // Error
-    }
-
-    up(&device.sem);
-
-    return 0;
-}
-
-// TODO In the case of a request that goes beyond end of the buffer, your implementation needs to expand the buffer and fill the new region with zeros.
-loff_t mycdrv_llseek(struct file *file, loff_t offset, int origin) {
-    loff_t new_pos;
-
-    if (down_interruptible(&device.sem)) {
-        return -ERESTARTSYS; // From LDD3
-    }
-
-    switch (origin) {
-    case SEEK_SET:
-        new_pos = offset;
-        break;
-    case SEEK_CUR:
-        new_pos = file->f_pos + offset;
-        break;
-    case SEEK_END:
-        new_pos = device.data_size + offset;
-        break;
-    default:
-        up(&device.sem);
-        return -EINVAL;
-    }
-
-    // Ensure new_pos is actually valid
-    if (new_pos < 0) {
-        up(&device.sem);
-        return -EINVAL;
-    }
-
-    pr_info("tuxdrv: lseek(): new_pos=%lld\n", new_pos);
-
-    // Update file pointer
-    file->f_pos = new_pos;
-
-    up(&device.sem);
-
-    return new_pos;
-}
-
-int __init my_init(void) {
-    /* File operations struct. Must have static
+/**
+ * @brief Allocate and initialize a new tuxdrv_t object.
+ * 
+ * @param list Linked list to add this new object to.
+ * @param devNo Device number (major + minor) for this device.
+ * @param deviceClass
+ */
+void tuxdrv_t_create(struct list_head* list, dev_t devNo, struct class* deviceClass) {
+	/* File operations struct. Must have static
     lifetime because it is accessed for the entirety
     of the module's lifetime.*/
     static const struct file_operations FOPS = {
@@ -165,12 +58,175 @@ int __init my_init(void) {
         .llseek = mycdrv_llseek,
     };
 
+	tuxdrv_t* new_device = kmalloc(sizeof(tuxdrv_t), GFP_KERNEL);
+	
+	sema_init(&new_device->sem, 1);
+	cdev_init(&new_device->cdev, &FOPS);
+	cdev_add(&new_device->cdev, devNo, 1); // 1 device per struct in this lab.
+	device_create(deviceClass, NULL, devNo, NULL, "tux%d", MINOR(devNo));
+	
+	// Add to linked list.
+	list_add(&new_device->list, list);
+}
+
+void tuxdrv_t_destroy(tuxdrv_t* device, struct class* deviceClass) {
+	device_destroy(deviceClass, device->cdev.dev);
+	kfree(device->ramdisk);
+	cdev_del(&device->cdev);
+}
+
+/**
+ * @brief Linked list of devices
+ */
+LIST_HEAD(devices);
+
+// tuxdrv_t device; // Module instance
+
+
+dev_t first;
+unsigned int count = 1;
+struct class *device_class;
+
+int mycdrv_open(struct inode *inode, struct file *file) {
+	// Set file private data to the device for easy access in other functions.
+	tuxdrv_t* device = container_of(inode->i_cdev, tuxdrv_t, cdev);
+	file->private_data = device;
+
+    pr_info("tuxdrv: open(): %s%d\n", MYDEV_NAME, MINOR(device->cdev.dev));
+    return 0;
+}
+
+int mycdrv_release(struct inode *inode, struct file *file) {
+	tuxdrv_t* device = file->private_data;
+
+    pr_info("tuxdrv: close(): %s%d\n", MYDEV_NAME, MINOR(device->cdev.dev));
+    return 0;
+}
+
+ssize_t mycdrv_read(struct file *file, char __user *buf, size_t lbuf,
+                           loff_t *ppos) {
+	tuxdrv_t* device = file->private_data;
+
+    int nbytes;
+    if ((lbuf + *ppos) > RAMDISK_SIZE) {
+        pr_info("trying to read past end of device,"
+                "aborting because this is just a stub!\n");
+        return 0;
+    }
+
+    if (down_interruptible(&device->sem)) {
+        return -ERESTARTSYS; // From LDD3
+    }
+
+    nbytes = lbuf - copy_to_user(buf, device->ramdisk + *ppos, lbuf);
+    *ppos += nbytes;
+    pr_info("tuxdrv: read(): nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
+
+    up(&device->sem);
+
+    return nbytes;
+}
+
+ssize_t mycdrv_write(struct file *file, const char __user *buf,
+                            size_t lbuf, loff_t *ppos) {
+	tuxdrv_t* device = file->private_data;
+
+    int nbytes;
+    if ((lbuf + *ppos) > RAMDISK_SIZE) {
+        pr_info("trying to read past end of device,"
+                "aborting because this is just a stub!\n");
+        return 0;
+    }
+
+    if (down_interruptible(&device->sem)) {
+        return -ERESTARTSYS; // From LDD3
+    }
+
+    nbytes = lbuf - copy_from_user(device->ramdisk + *ppos, buf, lbuf);
+    *ppos += nbytes;
+    pr_info("tuxdrv: write(): nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
+
+    if (device->data_size < *ppos) device->data_size = *ppos;
+
+    up(&device->sem);
+
+    return nbytes;
+}
+
+// TODO reset file position pointer to 0
+long mycdrv_ioctl(struct file *file, unsigned cmd, unsigned long arg) {
+	tuxdrv_t* device = file->private_data;
+
+    // Ensure  the magic number is correct
+    if (_IOC_TYPE(cmd) != 'Z') return -ENOTTY;
+
+    if (down_interruptible(&device->sem)) {
+        return -ERESTARTSYS; // From LDD3
+    }
+
+    switch (cmd) {
+    case ASP_CLEAR_BUF:
+        pr_info("tuxdrv: Clearing device buffer...\n");
+        memset(device->ramdisk, 0, RAMDISK_SIZE);
+        break;
+    default:
+        pr_err("tuxdrv: Invalid ioctl command.\n");
+        up(&device->sem);
+        return -1; // Error
+    }
+
+    up(&device->sem);
+
+    return 0;
+}
+
+// TODO In the case of a request that goes beyond end of the buffer, your implementation needs to expand the buffer and fill the new region with zeros.
+loff_t mycdrv_llseek(struct file *file, loff_t offset, int origin) {
+	tuxdrv_t* device = file->private_data;
+
+    loff_t new_pos;
+
+    if (down_interruptible(&device->sem)) {
+        return -ERESTARTSYS; // From LDD3
+    }
+
+    switch (origin) {
+    case SEEK_SET:
+        new_pos = offset;
+        break;
+    case SEEK_CUR:
+        new_pos = file->f_pos + offset;
+        break;
+    case SEEK_END:
+        new_pos = device->data_size + offset;
+        break;
+    default:
+        up(&device->sem);
+        return -EINVAL;
+    }
+
+    // Ensure new_pos is actually valid
+    if (new_pos < 0) {
+        up(&device->sem);
+        return -EINVAL;
+    }
+
+    pr_info("tuxdrv: lseek(): new_pos=%lld\n", new_pos);
+
+    // Update file pointer
+    file->f_pos = new_pos;
+
+    up(&device->sem);
+
+    return new_pos;
+}
+
+int __init my_init(void) {
     int err;
 
 	pr_info("tuxdrv: Number of devices: %d", NUM_DEVICES);
 
-    device.ramdisk = kmalloc(RAMDISK_SIZE, GFP_KERNEL);
-    err = alloc_chrdev_region(&first, 0, 1, MYDEV_NAME);
+    err = alloc_chrdev_region(&first, 0, NUM_DEVICES, MYDEV_NAME);
 
     if (err < 0) {
         pr_err("tuxdrv: Couldn't register chrdev region.\n");
@@ -179,35 +235,46 @@ int __init my_init(void) {
 
     pr_info("tuxdrv: Major number assigned = %d\n", MAJOR(first));
 
-    sema_init(&device.sem, 1); // TODO does this need to be destroyed?
-
-    cdev_init(&device.cdev, &FOPS);
-    cdev_add(&device.cdev, first, count);
-    pr_info("tuxdrv: Registered!\n");
-
     device_class = class_create(THIS_MODULE, "tuxdrv_cls");
-    device_create(device_class, NULL, first, NULL, "tux0");
+    // device_create(device_class, NULL, first, NULL, "tux0");
+	tuxdrv_t_create(&devices, first, device_class);
+
+	pr_info("tuxdrv: Devices created:\n");
+	struct list_head* e_ptr;
+	tuxdrv_t* e;
+	list_for_each(e_ptr, &devices) {
+		e = list_entry(e_ptr, tuxdrv_t, list);
+		
+		pr_info("\ttux%d\n", MINOR(e->cdev.dev));
+	}
+
+	pr_notice("tuxdrv: Module created successfully.\n");
+
     return 0;
 }
 
 void __exit my_exit(void) {
     pr_info("tuxdrv: Removing module...\n");
 
-    device_destroy(device_class, first);
+	pr_warn("Destroying devices:\n");
+
+	struct list_head* e_ptr;
+	tuxdrv_t* e;
+	list_for_each(e_ptr, &devices) {
+		e = list_entry(e_ptr, tuxdrv_t, list);
+		
+		pr_warn("\ttux%d\n", MINOR(e->cdev.dev));
+		
+		tuxdrv_t_destroy(e, device_class);
+
+	}
 
     class_destroy(device_class);
 
-    kfree(device.ramdisk);
-
-    cdev_del(&device.cdev);
-
     unregister_chrdev_region(first, count);
 
-    pr_info("tuxdrv: Module removed.\n");
+    pr_notice("tuxdrv: Module removed.\n");
 }
 
 module_init(my_init);
 module_exit(my_exit);
-
-MODULE_AUTHOR("Benjamin Wheeler");
-MODULE_LICENSE("GPL v2");
