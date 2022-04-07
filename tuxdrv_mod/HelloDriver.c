@@ -12,7 +12,7 @@ int main(void) {
 		return -1;
 	}
 
-	char* msg = "testing writing\n";
+	char* msg = "testing writing\nHello there! \n... general kenobi??";
 	printf("message length: %lu\n", strlen(msg));
 	write(fd, (void*)msg, strlen(msg));
 
@@ -22,9 +22,9 @@ int main(void) {
 	
 	close(fd);
 	fd = open("/dev/tux0", O_RDONLY);
-	char buf[64];
+	char buf[128];
 	read(fd, &buf, sizeof buf);
-	printf("Read msg: %s\n", buf);	
+	printf("Read msg: \"%s\"\n", buf);	
 	close(fd);
 	return 0;
 }
