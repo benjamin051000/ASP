@@ -186,7 +186,6 @@ long mycdrv_ioctl(struct file *file, unsigned cmd, unsigned long arg) {
     return 0;
 }
 
-// TODO In the case of a request that goes beyond end of the buffer, your implementation needs to expand the buffer and fill the new region with zeros.
 loff_t mycdrv_llseek(struct file *file, loff_t offset, int origin) {
 	tuxdrv_t* device = file->private_data;
 
@@ -215,6 +214,12 @@ loff_t mycdrv_llseek(struct file *file, loff_t offset, int origin) {
     if (new_pos < 0) {
         up(&device->sem);
         return -EINVAL;
+    }
+    else if(new_pos >= RAMDISK_SIZE) {
+        // Reallocate ramdisk to fulfill request
+        device->ramdisk = krealloc(device->ramdisk, new_pos, GFP_KERNEL);
+        // Set new space to zero.
+        memset(device->ramdisk + device->eof, 0, new_pos); // first arg +1?
     }
 
     pr_info("tuxdrv: lseek(): new_pos=%lld\n", new_pos);
