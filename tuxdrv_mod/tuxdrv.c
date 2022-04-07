@@ -9,6 +9,14 @@
 #define RAMDISK_SIZE (size_t)(16 * PAGE_SIZE)
 #define ASP_CLEAR_BUF _IOW('Z', 1, int)
 
+/**
+ * @brief Specifies the number of devices that should be created on insmod.
+ * Default is 3. 
+ * Override when running insmod: `insmod tuxdrv.ko NUM_DEVICES=<new num>`
+ */
+int NUM_DEVICES = 3;
+module_param(NUM_DEVICES, int, S_IRUGO);
+
 typedef struct {
 	struct cdev cdev; // cdev device struct
 	dev_t dev_num; // Device number (major and minor)
@@ -158,6 +166,9 @@ int __init my_init(void) {
     };
 
     int err;
+
+	pr_info("tuxdrv: Number of devices: %d", NUM_DEVICES);
+
     device.ramdisk = kmalloc(RAMDISK_SIZE, GFP_KERNEL);
     err = alloc_chrdev_region(&first, 0, 1, MYDEV_NAME);
 
