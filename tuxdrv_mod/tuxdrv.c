@@ -30,7 +30,10 @@ Sample Character Driver
 #define MYDEV_NAME "mycdrv"
 
 static char *ramdisk;
-#define ramdisk_size (size_t) (16*PAGE_SIZE)
+#define RAMDISK_SIZE (size_t) (16*PAGE_SIZE)
+
+#define CLEAR_BUF _IOW('Z', 1, int)
+
 
 static dev_t first;
 static unsigned int count = 1;
@@ -54,7 +57,7 @@ static ssize_t
 mycdrv_read(struct file *file, char __user * buf, size_t lbuf, loff_t * ppos)
 {
 	int nbytes;
-	if ((lbuf + *ppos) > ramdisk_size) {
+	if ((lbuf + *ppos) > RAMDISK_SIZE) {
 		pr_info("trying to read past end of device,"
 			"aborting because this is just a stub!\n");
 		return 0;
@@ -70,7 +73,7 @@ mycdrv_write(struct file *file, const char __user * buf, size_t lbuf,
 	     loff_t * ppos)
 {
 	int nbytes;
-	if ((lbuf + *ppos) > ramdisk_size) {
+	if ((lbuf + *ppos) > RAMDISK_SIZE) {
 		pr_info("trying to read past end of device,"
 			"aborting because this is just a stub!\n");
 		return 0;
@@ -81,18 +84,36 @@ mycdrv_write(struct file *file, const char __user * buf, size_t lbuf,
 	return nbytes;
 }
 
+long mycdrv_ioctl(struct file *file, unsigned cmd, unsigned long arg) {
+	// Ensure  the magic number is correct
+    if(_IOC_TYPE(cmd) != 'Z') return -ENOTTY;
+
+	switch(cmd) {
+		case CLEAR_BUF:
+			pr_warn("tuxdrv: Clearing device buffer...\n");
+            memset(ramdisk, 0, RAMDISK_SIZE);
+		break;
+		default:
+		pr_err("tuxdrv: Invalid ioctl command.\n");
+		return -1; // Error
+	}
+
+	return 0;
+}
+
 static const struct file_operations mycdrv_fops = {
 	.owner = THIS_MODULE,
 	.read = mycdrv_read,
 	.write = mycdrv_write,
 	.open = mycdrv_open,
 	.release = mycdrv_release,
+	.unlocked_ioctl = mycdrv_ioctl,
 };
 
 static int __init my_init(void)
 {
 	int err;
-	ramdisk = kmalloc(ramdisk_size, GFP_KERNEL);
+	ramdisk = kmalloc(RAMDISK_SIZE, GFP_KERNEL);
 	err = alloc_chrdev_region(&first, 0, 1, MYDEV_NAME);
 
 	if(err < 0) {
