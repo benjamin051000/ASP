@@ -76,9 +76,10 @@ void tuxdrv_t_destroy(tuxdrv_t* device, struct class* deviceClass) {
 	cdev_del(&device->cdev);
     pr_notice("tuxdrv: removing device from linked list...\n");
     // Remove device from list
-    list_del(&device->list);
-    pr_notice("tuxdrv: freeing device...\n");
+    // list_del(&device->list); // TODO BUG Does not appear to be working?
+    
     // Delete heap-allocated device
+    pr_notice("tuxdrv: freeing device...\n");
     kfree(device);
 }
 
