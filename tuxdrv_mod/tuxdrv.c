@@ -34,7 +34,7 @@ static char *ramdisk;
 
 static dev_t first;
 static unsigned int count = 1;
-static struct cdev *my_cdev;
+static struct cdev my_cdev;
 
 struct class* device_class;
 
@@ -102,9 +102,8 @@ static int __init my_init(void)
 
 	pr_info("tuxdrv: Major number assigned = %d\n", MAJOR(first));
 	
-	my_cdev = cdev_alloc();
-	cdev_init(my_cdev, &mycdrv_fops);
-	cdev_add(my_cdev, first, count);
+	cdev_init(&my_cdev, &mycdrv_fops);
+	cdev_add(&my_cdev, first, count);
 //	pr_info("\nSucceeded in registering character device %s\n", MYDEV_NAME);
 	pr_info("tuxdrv: Registered!\n");
 
@@ -127,7 +126,7 @@ static void __exit my_exit(void)
 	kfree(ramdisk);
 
 	pr_info("tuxdrv: \tDeleting cdev\n");
-	cdev_del(my_cdev);
+	cdev_del(&my_cdev);
 
 	pr_info("tuxdrv: \tUnregistering chrdev region\n");
 	unregister_chrdev_region(first, count);
