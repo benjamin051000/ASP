@@ -58,8 +58,9 @@ void tuxdrv_t_create(struct list_head* list, dev_t devNo, struct class* deviceCl
         .llseek = mycdrv_llseek,
     };
 
-	tuxdrv_t* new_device = kmalloc(sizeof(tuxdrv_t), GFP_KERNEL);
+	tuxdrv_t* new_device = kmalloc(sizeof(tuxdrv_t), GFP_KERNEL); // TODO kfree() this
 	
+    new_device->ramdisk = kzalloc(RAMDISK_SIZE, GFP_KERNEL);
 	sema_init(&new_device->sem, 1);
 	cdev_init(&new_device->cdev, &FOPS);
 	cdev_add(&new_device->cdev, devNo, 1); // 1 device per struct in this lab.
@@ -137,7 +138,7 @@ ssize_t mycdrv_write(struct file *file, const char __user *buf,
                 "aborting because this is just a stub!\n");
         return 0;
     }
-
+    
     if (down_interruptible(&device->sem)) {
         return -ERESTARTSYS; // From LDD3
     }
