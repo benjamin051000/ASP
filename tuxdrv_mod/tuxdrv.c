@@ -131,18 +131,21 @@ loff_t mycdrv_llseek(struct file* file, loff_t offset, int origin) {
     return new_pos;
 }
 
-static const struct file_operations mycdrv_fops = {
-	.owner = THIS_MODULE,
-	.read = mycdrv_read,
-	.write = mycdrv_write,
-	.open = mycdrv_open,
-	.release = mycdrv_release,
-	.unlocked_ioctl = mycdrv_ioctl,
-	.llseek = mycdrv_llseek,
-};
-
 static int __init my_init(void)
 {
+	/* File operations struct. Must have static 
+	lifetime because it is accessed for the entirety 
+	of the module's lifetime.*/
+	static const struct file_operations FOPS = {
+		.owner = THIS_MODULE,
+		.read = mycdrv_read,
+		.write = mycdrv_write,
+		.open = mycdrv_open,
+		.release = mycdrv_release,
+		.unlocked_ioctl = mycdrv_ioctl,
+		.llseek = mycdrv_llseek,
+	};
+
 	int err;
 	ramdisk = kmalloc(RAMDISK_SIZE, GFP_KERNEL);
 	err = alloc_chrdev_region(&first, 0, 1, MYDEV_NAME);
@@ -154,7 +157,7 @@ static int __init my_init(void)
 
 	pr_info("tuxdrv: Major number assigned = %d\n", MAJOR(first));
 	
-	cdev_init(&my_cdev, &mycdrv_fops);
+	cdev_init(&my_cdev, &FOPS);
 	cdev_add(&my_cdev, first, count);
 //	pr_info("\nSucceeded in registering character device %s\n", MYDEV_NAME);
 	pr_info("tuxdrv: Registered!\n");
