@@ -74,6 +74,12 @@ void tuxdrv_t_destroy(tuxdrv_t* device, struct class* deviceClass) {
 	device_destroy(deviceClass, device->cdev.dev);
 	kfree(device->ramdisk);
 	cdev_del(&device->cdev);
+    pr_notice("tuxdrv: removing device from linked list...\n");
+    // Remove device from list
+    list_del(&device->list);
+    pr_notice("tuxdrv: freeing device...\n");
+    // Delete heap-allocated device
+    kfree(device);
 }
 
 /**
@@ -88,6 +94,7 @@ dev_t first;
 unsigned int count = 1;
 struct class *device_class;
 
+// TODO should the sem go down here and up in close()? What if multiple procs are modifying data on same device? Could this cause problems?
 int mycdrv_open(struct inode *inode, struct file *file) {
 	// Set file private data to the device for easy access in other functions.
 	tuxdrv_t* device = container_of(inode->i_cdev, tuxdrv_t, cdev);
@@ -199,7 +206,7 @@ loff_t mycdrv_llseek(struct file *file, loff_t offset, int origin) {
         new_pos = file->f_pos + offset;
         break;
     case SEEK_END:
-        new_pos = device->data_size + offset;
+        new_pos = device->data_size + offset;  // TODO is data_size the way to do this? It appears to pass the tests...
         break;
     default:
         up(&device->sem);
