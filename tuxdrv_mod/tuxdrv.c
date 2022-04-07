@@ -38,18 +38,19 @@ static char *ramdisk;
 static dev_t first;
 static unsigned int count = 1;
 static struct cdev my_cdev;
+loff_t end_of_data = 0; // End of current data in ramdisk
 
 struct class* device_class;
 
 static int mycdrv_open(struct inode *inode, struct file *file)
 {
-	pr_info("tuxdrv: OPENING device: %s:\n\n", MYDEV_NAME);
+	pr_info("tuxdrv: open(): %s:\n\n", MYDEV_NAME);
 	return 0;
 }
 
 static int mycdrv_release(struct inode *inode, struct file *file)
 {
-	pr_info("tuxdrv: CLOSING device: %s:\n\n", MYDEV_NAME);
+	pr_info("tuxdrv: close(): %s:\n\n", MYDEV_NAME);
 	return 0;
 }
 
@@ -64,7 +65,7 @@ mycdrv_read(struct file *file, char __user * buf, size_t lbuf, loff_t * ppos)
 	}
 	nbytes = lbuf - copy_to_user(buf, ramdisk + *ppos, lbuf);
 	*ppos += nbytes;
-	pr_info("tuxdrv: READING function, nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
+	pr_info("tuxdrv: read(): nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
 	return nbytes;
 }
 
@@ -80,7 +81,11 @@ mycdrv_write(struct file *file, const char __user * buf, size_t lbuf,
 	}
 	nbytes = lbuf - copy_from_user(ramdisk + *ppos, buf, lbuf);
 	*ppos += nbytes;
-	pr_info("tuxdrv: WRITING function, nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
+	pr_info("tuxdrv: write(): nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
+
+	if(end_of_data < *ppos)
+		end_of_data = *ppos;
+
 	return nbytes;
 }
 
@@ -90,7 +95,7 @@ long mycdrv_ioctl(struct file *file, unsigned cmd, unsigned long arg) {
 
 	switch(cmd) {
 		case CLEAR_BUF:
-			pr_warn("tuxdrv: Clearing device buffer...\n");
+			pr_info("tuxdrv: Clearing device buffer...\n");
             memset(ramdisk, 0, RAMDISK_SIZE);
 		break;
 		default:
@@ -109,7 +114,7 @@ loff_t mycdrv_llseek(struct file* file, loff_t offset, int origin) {
         break;
         case SEEK_CUR: new_pos = file->f_pos + offset;
         break;
-        case SEEK_END: new_pos = RAMDISK_SIZE + offset; // TODO wouldn't this go beyond ramdisk limit? Out of bounds? Segfault? :o
+        case SEEK_END: new_pos = end_of_data + offset;
         break;
         default:
         return -EINVAL;
@@ -117,6 +122,8 @@ loff_t mycdrv_llseek(struct file* file, loff_t offset, int origin) {
 
     // Ensure new_pos is actually valid
 	if(new_pos < 0) return -EINVAL;
+	
+	pr_info("tuxdrv: lseek(): new_pos=%lld", new_pos);
 	
 	// Update file pointer
 	file->f_pos = new_pos;
