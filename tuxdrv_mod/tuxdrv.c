@@ -37,6 +37,8 @@ static unsigned int count = 1;
 static int my_major = 500, my_minor = 0;
 static struct cdev *my_cdev;
 
+struct class* device_class;
+
 static int mycdrv_open(struct inode *inode, struct file *file)
 {
 	pr_info(" OPENING device: %s:\n\n", MYDEV_NAME);
@@ -98,19 +100,26 @@ static int __init my_init(void)
 	cdev_add(my_cdev, first, count);
 //	pr_info("\nSucceeded in registering character device %s\n", MYDEV_NAME);
 	pr_info("\n Registered! Good job, Benjamin.\n");
+
+	device_class = class_create(THIS_MODULE, "tuxdrv_cls");
+	device_create(device_class, NULL, first, NULL, "tux0");
 	return 0;
 }
 
 static void __exit my_exit(void)
 {
+	device_destroy(device_class, first);
+	class_unregister(device_class);
+	class_destroy(device_class);
+
+	kfree(ramdisk);
 	cdev_del(my_cdev);
 	unregister_chrdev_region(first, count);
 	pr_info("\nUnregistered. Goodbye, Benjamin.\n");
-	kfree(ramdisk);
 }
 
 module_init(my_init);
 module_exit(my_exit);
 
-MODULE_AUTHOR("Jerry Cooperstein");
+MODULE_AUTHOR("Benjamin Wheeler");
 MODULE_LICENSE("GPL v2");
