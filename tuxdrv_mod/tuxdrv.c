@@ -101,6 +101,29 @@ long mycdrv_ioctl(struct file *file, unsigned cmd, unsigned long arg) {
 	return 0;
 }
 
+loff_t mycdrv_llseek(struct file* file, loff_t offset, int origin) {
+	loff_t new_pos;
+    
+    switch(origin) {
+        case SEEK_SET: new_pos = offset;
+        break;
+        case SEEK_CUR: new_pos = file->f_pos + offset;
+        break;
+        case SEEK_END: new_pos = RAMDISK_SIZE + offset; // TODO wouldn't this go beyond ramdisk limit? Out of bounds? Segfault? :o
+        break;
+        default:
+        return -EINVAL;
+    }
+
+    // Ensure new_pos is actually valid
+	if(new_pos < 0) return -EINVAL;
+	
+	// Update file pointer
+	file->f_pos = new_pos;
+
+    return new_pos;
+}
+
 static const struct file_operations mycdrv_fops = {
 	.owner = THIS_MODULE,
 	.read = mycdrv_read,
@@ -108,6 +131,7 @@ static const struct file_operations mycdrv_fops = {
 	.open = mycdrv_open,
 	.release = mycdrv_release,
 	.unlocked_ioctl = mycdrv_ioctl,
+	.llseek = mycdrv_llseek,
 };
 
 static int __init my_init(void)
