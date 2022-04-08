@@ -70,6 +70,9 @@ void mycdrv_t_create(struct list_head* list, dev_t devNo, struct class* deviceCl
 	list_add(&new_device->list, list);
 }
 
+/**
+ * Delete a device and all its associated data.
+ */
 void mycdrv_t_destroy(mycdrv_t* device, struct class* deviceClass) {
 	device_destroy(deviceClass, device->cdev.dev);
 	kfree(device->ramdisk);
@@ -92,6 +95,9 @@ dev_t first;
 unsigned int count = 1;
 struct class *device_class;
 
+/**
+ * open() syscall
+ */
 int mycdrv_open(struct inode *inode, struct file *file) {
 	// Set file private data to the device for easy access in other functions.
 	mycdrv_t* device = container_of(inode->i_cdev, mycdrv_t, cdev);
@@ -101,6 +107,9 @@ int mycdrv_open(struct inode *inode, struct file *file) {
     return 0;
 }
 
+/**
+ * close() syscall
+ */
 int mycdrv_release(struct inode *inode, struct file *file) {
 	mycdrv_t* device = file->private_data;
 
@@ -108,6 +117,9 @@ int mycdrv_release(struct inode *inode, struct file *file) {
     return 0;
 }
 
+/**
+ * read() syscall
+ */
 ssize_t mycdrv_read(struct file *file, char __user *buf, size_t lbuf,
                            loff_t *ppos) {
 	mycdrv_t* device = file->private_data;
@@ -132,6 +144,9 @@ ssize_t mycdrv_read(struct file *file, char __user *buf, size_t lbuf,
     return nbytes;
 }
 
+/**
+ * write() syscall
+ */
 ssize_t mycdrv_write(struct file *file, const char __user *buf,
                             size_t lbuf, loff_t *ppos) {
 	mycdrv_t* device = file->private_data;
@@ -158,6 +173,9 @@ ssize_t mycdrv_write(struct file *file, const char __user *buf,
     return nbytes;
 }
 
+/**
+ * ioctl() syscall
+ */
 long mycdrv_ioctl(struct file *file, unsigned cmd, unsigned long arg) {
 	mycdrv_t* device = file->private_data;
 
@@ -186,6 +204,9 @@ long mycdrv_ioctl(struct file *file, unsigned cmd, unsigned long arg) {
     return 0;
 }
 
+/**
+ * lseek() syscall
+ */
 loff_t mycdrv_llseek(struct file *file, loff_t offset, int origin) {
 	mycdrv_t* device = file->private_data;
 
@@ -232,6 +253,9 @@ loff_t mycdrv_llseek(struct file *file, loff_t offset, int origin) {
     return new_pos;
 }
 
+/**
+ * Module initialization function
+ */
 int __init my_init(void) {
     int err, i;
     struct list_head* e_ptr;
@@ -269,6 +293,9 @@ int __init my_init(void) {
     return 0;
 }
 
+/**
+ * Module exit function
+ */
 void __exit my_exit(void) {
 	struct list_head* e_ptr;
 	mycdrv_t* e;
