@@ -234,6 +234,8 @@ loff_t mycdrv_llseek(struct file *file, loff_t offset, int origin) {
 
 int __init my_init(void) {
     int err, i;
+    struct list_head* e_ptr;
+	tuxdrv_t* e;
 
 	pr_info(MYDEV_NAME ": Number of devices: %d", NUM_DEVICES);
 
@@ -255,8 +257,7 @@ int __init my_init(void) {
     }
 
 	pr_info(MYDEV_NAME ": Devices created:\n");
-	struct list_head* e_ptr;
-	tuxdrv_t* e;
+	
 	list_for_each(e_ptr, &devices) {
 		e = list_entry(e_ptr, tuxdrv_t, list);
 		
@@ -269,12 +270,13 @@ int __init my_init(void) {
 }
 
 void __exit my_exit(void) {
+	struct list_head* e_ptr;
+	tuxdrv_t* e;
+
     pr_info(MYDEV_NAME ": Removing module...\n");
 
 	pr_warn("Destroying devices:\n");
 
-	struct list_head* e_ptr;
-	tuxdrv_t* e;
 	list_for_each(e_ptr, &devices) {
 		e = list_entry(e_ptr, tuxdrv_t, list);
 		
