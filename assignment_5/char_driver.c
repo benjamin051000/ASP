@@ -74,12 +74,12 @@ void tuxdrv_t_destroy(tuxdrv_t* device, struct class* deviceClass) {
 	device_destroy(deviceClass, device->cdev.dev);
 	kfree(device->ramdisk);
 	cdev_del(&device->cdev);
-    pr_notice("tuxdrv: removing device from linked list...\n");
+    pr_notice(MYDEV_NAME ": removing device from linked list...\n");
     // Remove device from list
     // list_del(&device->list); // TODO BUG Does not appear to be working?
 
     // Delete heap-allocated device
-    pr_notice("tuxdrv: freeing device...\n");
+    pr_notice(MYDEV_NAME ": freeing device...\n");
     kfree(device);
 }
 
@@ -97,14 +97,14 @@ int mycdrv_open(struct inode *inode, struct file *file) {
 	tuxdrv_t* device = container_of(inode->i_cdev, tuxdrv_t, cdev);
 	file->private_data = device;
 
-    pr_info("tuxdrv: open(): %s%d\n", MYDEV_NAME, MINOR(device->cdev.dev));
+    pr_info(MYDEV_NAME ": open(): %s%d\n", MYDEV_NAME, MINOR(device->cdev.dev));
     return 0;
 }
 
 int mycdrv_release(struct inode *inode, struct file *file) {
 	tuxdrv_t* device = file->private_data;
 
-    pr_info("tuxdrv: close(): %s%d\n", MYDEV_NAME, MINOR(device->cdev.dev));
+    pr_info(MYDEV_NAME ": close(): %s%d\n", MYDEV_NAME, MINOR(device->cdev.dev));
     return 0;
 }
 
@@ -125,7 +125,7 @@ ssize_t mycdrv_read(struct file *file, char __user *buf, size_t lbuf,
 
     nbytes = lbuf - copy_to_user(buf, device->ramdisk + *ppos, lbuf);
     *ppos += nbytes;
-    pr_info("tuxdrv: read(): nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
+    pr_info(MYDEV_NAME ": read(): nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
 
     up(&device->sem);
 
@@ -149,7 +149,7 @@ ssize_t mycdrv_write(struct file *file, const char __user *buf,
 
     nbytes = lbuf - copy_from_user(device->ramdisk + *ppos, buf, lbuf);
     *ppos += nbytes;
-    pr_info("tuxdrv: write(): nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
+    pr_info(MYDEV_NAME ": write(): nbytes=%d, pos=%d\n", nbytes, (int)*ppos);
 
     if (device->eof < *ppos) device->eof = *ppos;
 
@@ -170,13 +170,13 @@ long mycdrv_ioctl(struct file *file, unsigned cmd, unsigned long arg) {
 
     switch (cmd) {
     case ASP_CLEAR_BUF:
-        pr_info("tuxdrv: Clearing device buffer...\n");
+        pr_info(MYDEV_NAME ": Clearing device buffer...\n");
         memset(device->ramdisk, 0, RAMDISK_SIZE);
         file->f_pos = 0;
         device->eof = 0;
         break;
     default:
-        pr_err("tuxdrv: Invalid ioctl command.\n");
+        pr_err(MYDEV_NAME ": Invalid ioctl command.\n");
         up(&device->sem);
         return -1; // Error
     }
@@ -222,7 +222,7 @@ loff_t mycdrv_llseek(struct file *file, loff_t offset, int origin) {
         memset(device->ramdisk + device->eof, 0, new_pos); // first arg +1?
     }
 
-    pr_info("tuxdrv: lseek(): new_pos=%lld\n", new_pos);
+    pr_info(MYDEV_NAME ": lseek(): new_pos=%lld\n", new_pos);
 
     // Update file pointer
     file->f_pos = new_pos;
@@ -235,16 +235,16 @@ loff_t mycdrv_llseek(struct file *file, loff_t offset, int origin) {
 int __init my_init(void) {
     int err, i;
 
-	pr_info("tuxdrv: Number of devices: %d", NUM_DEVICES);
+	pr_info(MYDEV_NAME ": Number of devices: %d", NUM_DEVICES);
 
     err = alloc_chrdev_region(&first, 0, NUM_DEVICES, MYDEV_NAME);
 
     if (err < 0) {
-        pr_err("tuxdrv: Couldn't register chrdev region.\n");
+        pr_err(MYDEV_NAME ": Couldn't register chrdev region.\n");
         return -1;
     }
 
-    pr_info("tuxdrv: Major number assigned = %d\n", MAJOR(first));
+    pr_info(MYDEV_NAME ": Major number assigned = %d\n", MAJOR(first));
 
     device_class = class_create(THIS_MODULE, "tuxdrv_cls");
     // device_create(device_class, NULL, first, NULL, "tux0");
@@ -254,22 +254,22 @@ int __init my_init(void) {
 	    tuxdrv_t_create(&devices, d, device_class);
     }
 
-	pr_info("tuxdrv: Devices created:\n");
+	pr_info(MYDEV_NAME ": Devices created:\n");
 	struct list_head* e_ptr;
 	tuxdrv_t* e;
 	list_for_each(e_ptr, &devices) {
 		e = list_entry(e_ptr, tuxdrv_t, list);
 		
-		pr_info("\ttux%d\n", MINOR(e->cdev.dev));
+		pr_info("\t%s%d\n", MYDEV_NAME, MINOR(e->cdev.dev));
 	}
 
-	pr_notice("tuxdrv: Module created successfully.\n");
+	pr_notice(MYDEV_NAME ": Module created successfully.\n");
 
     return 0;
 }
 
 void __exit my_exit(void) {
-    pr_info("tuxdrv: Removing module...\n");
+    pr_info(MYDEV_NAME ": Removing module...\n");
 
 	pr_warn("Destroying devices:\n");
 
@@ -278,7 +278,7 @@ void __exit my_exit(void) {
 	list_for_each(e_ptr, &devices) {
 		e = list_entry(e_ptr, tuxdrv_t, list);
 		
-		pr_warn("\ttux%d\n", MINOR(e->cdev.dev));
+		pr_warn("\t%s%d\n", MYDEV_NAME, MINOR(e->cdev.dev));
 		
 		tuxdrv_t_destroy(e, device_class);
 
@@ -288,7 +288,7 @@ void __exit my_exit(void) {
 
     unregister_chrdev_region(first, count);
 
-    pr_notice("tuxdrv: Module removed.\n");
+    pr_notice(MYDEV_NAME ": Module removed.\n");
 }
 
 module_init(my_init);
