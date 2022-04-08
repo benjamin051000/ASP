@@ -33,7 +33,7 @@ typedef struct {
 	char *ramdisk; // Data 
 	loff_t eof; // Location of end of written data (0 to RAMDISK_SIZE)
 	struct semaphore sem;
-	
+	// int devNo stored in cdev.dev. No need to store it twice
 	struct list_head list; // Linked list of devices
 } mycdrv_t;
 
