@@ -35,10 +35,10 @@ typedef struct {
 	struct semaphore sem;
 	
 	struct list_head list; // Linked list of devices
-} tuxdrv_t;
+} mycdrv_t;
 
 /**
- * @brief Allocate and initialize a new tuxdrv_t object.
+ * @brief Allocate and initialize a new mycdrv_t object.
  * 
  * @param list Linked list to add this new object to.
  * @param devNo Device number (major + minor) for this device.
@@ -58,7 +58,7 @@ void tuxdrv_t_create(struct list_head* list, dev_t devNo, struct class* deviceCl
         .llseek = mycdrv_llseek,
     };
 
-	tuxdrv_t* new_device = kmalloc(sizeof(tuxdrv_t), GFP_KERNEL); // TODO kfree() this
+	mycdrv_t* new_device = kmalloc(sizeof(mycdrv_t), GFP_KERNEL);
 	
     new_device->ramdisk = kzalloc(RAMDISK_SIZE, GFP_KERNEL);
 	sema_init(&new_device->sem, 1);
@@ -70,13 +70,13 @@ void tuxdrv_t_create(struct list_head* list, dev_t devNo, struct class* deviceCl
 	list_add(&new_device->list, list);
 }
 
-void tuxdrv_t_destroy(tuxdrv_t* device, struct class* deviceClass) {
+void tuxdrv_t_destroy(mycdrv_t* device, struct class* deviceClass) {
 	device_destroy(deviceClass, device->cdev.dev);
 	kfree(device->ramdisk);
 	cdev_del(&device->cdev);
     pr_notice(MYDEV_NAME ": removing device from linked list...\n");
     // Remove device from list
-    // list_del(&device->list); // TODO BUG Does not appear to be working?
+    // list_del(&device->list); // TODO BUG Does not appear to be working
 
     // Delete heap-allocated device
     pr_notice(MYDEV_NAME ": freeing device...\n");
@@ -94,7 +94,7 @@ struct class *device_class;
 
 int mycdrv_open(struct inode *inode, struct file *file) {
 	// Set file private data to the device for easy access in other functions.
-	tuxdrv_t* device = container_of(inode->i_cdev, tuxdrv_t, cdev);
+	mycdrv_t* device = container_of(inode->i_cdev, mycdrv_t, cdev);
 	file->private_data = device;
 
     pr_info(MYDEV_NAME ": open(): %s%d\n", MYDEV_NAME, MINOR(device->cdev.dev));
@@ -102,7 +102,7 @@ int mycdrv_open(struct inode *inode, struct file *file) {
 }
 
 int mycdrv_release(struct inode *inode, struct file *file) {
-	tuxdrv_t* device = file->private_data;
+	mycdrv_t* device = file->private_data;
 
     pr_info(MYDEV_NAME ": close(): %s%d\n", MYDEV_NAME, MINOR(device->cdev.dev));
     return 0;
@@ -110,7 +110,7 @@ int mycdrv_release(struct inode *inode, struct file *file) {
 
 ssize_t mycdrv_read(struct file *file, char __user *buf, size_t lbuf,
                            loff_t *ppos) {
-	tuxdrv_t* device = file->private_data;
+	mycdrv_t* device = file->private_data;
 
     int nbytes;
     if ((lbuf + *ppos) > RAMDISK_SIZE) {
@@ -134,7 +134,7 @@ ssize_t mycdrv_read(struct file *file, char __user *buf, size_t lbuf,
 
 ssize_t mycdrv_write(struct file *file, const char __user *buf,
                             size_t lbuf, loff_t *ppos) {
-	tuxdrv_t* device = file->private_data;
+	mycdrv_t* device = file->private_data;
 
     int nbytes;
     if ((lbuf + *ppos) > RAMDISK_SIZE) {
@@ -159,7 +159,7 @@ ssize_t mycdrv_write(struct file *file, const char __user *buf,
 }
 
 long mycdrv_ioctl(struct file *file, unsigned cmd, unsigned long arg) {
-	tuxdrv_t* device = file->private_data;
+	mycdrv_t* device = file->private_data;
 
     // Ensure  the magic number is correct
     if (_IOC_TYPE(cmd) != 'Z') return -ENOTTY;
@@ -187,7 +187,7 @@ long mycdrv_ioctl(struct file *file, unsigned cmd, unsigned long arg) {
 }
 
 loff_t mycdrv_llseek(struct file *file, loff_t offset, int origin) {
-	tuxdrv_t* device = file->private_data;
+	mycdrv_t* device = file->private_data;
 
     loff_t new_pos;
 
@@ -235,7 +235,7 @@ loff_t mycdrv_llseek(struct file *file, loff_t offset, int origin) {
 int __init my_init(void) {
     int err, i;
     struct list_head* e_ptr;
-	tuxdrv_t* e;
+	mycdrv_t* e;
 
 	pr_info(MYDEV_NAME ": Number of devices: %d", NUM_DEVICES);
 
@@ -259,7 +259,7 @@ int __init my_init(void) {
 	pr_info(MYDEV_NAME ": Devices created:\n");
 	
 	list_for_each(e_ptr, &devices) {
-		e = list_entry(e_ptr, tuxdrv_t, list);
+		e = list_entry(e_ptr, mycdrv_t, list);
 		
 		pr_info("\t%s%d\n", MYDEV_NAME, MINOR(e->cdev.dev));
 	}
@@ -271,14 +271,14 @@ int __init my_init(void) {
 
 void __exit my_exit(void) {
 	struct list_head* e_ptr;
-	tuxdrv_t* e;
+	mycdrv_t* e;
 
     pr_info(MYDEV_NAME ": Removing module...\n");
 
 	pr_warn("Destroying devices:\n");
 
 	list_for_each(e_ptr, &devices) {
-		e = list_entry(e_ptr, tuxdrv_t, list);
+		e = list_entry(e_ptr, mycdrv_t, list);
 		
 		pr_warn("\t%s%d\n", MYDEV_NAME, MINOR(e->cdev.dev));
 		
