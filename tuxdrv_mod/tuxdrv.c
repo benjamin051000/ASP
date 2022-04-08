@@ -9,7 +9,7 @@
 MODULE_AUTHOR("Benjamin Wheeler");
 MODULE_LICENSE("GPL v2");
 
-#define MYDEV_NAME "mycdev"
+#define MYDEV_NAME "tuxdrv"
 #define RAMDISK_SIZE (size_t)(16 * PAGE_SIZE)
 #define ASP_CLEAR_BUF _IOW('Z', 1, int)
 
@@ -64,7 +64,7 @@ void tuxdrv_t_create(struct list_head* list, dev_t devNo, struct class* deviceCl
 	sema_init(&new_device->sem, 1);
 	cdev_init(&new_device->cdev, &FOPS);
 	cdev_add(&new_device->cdev, devNo, 1); // 1 device per struct in this lab.
-	device_create(deviceClass, NULL, devNo, NULL, "%s%d", MYDEV_NAME, MINOR(devNo));
+	device_create(deviceClass, NULL, devNo, NULL, "tux%d", MINOR(devNo));
 	
 	// Add to linked list.
 	list_add(&new_device->list, list);
