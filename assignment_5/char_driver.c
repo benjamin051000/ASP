@@ -44,7 +44,7 @@ typedef struct {
  * @param devNo Device number (major + minor) for this device.
  * @param deviceClass
  */
-void tuxdrv_t_create(struct list_head* list, dev_t devNo, struct class* deviceClass) {
+void mycdrv_t_create(struct list_head* list, dev_t devNo, struct class* deviceClass) {
 	/* File operations struct. Must have static
     lifetime because it is accessed for the entirety
     of the module's lifetime.*/
@@ -70,7 +70,7 @@ void tuxdrv_t_create(struct list_head* list, dev_t devNo, struct class* deviceCl
 	list_add(&new_device->list, list);
 }
 
-void tuxdrv_t_destroy(mycdrv_t* device, struct class* deviceClass) {
+void mycdrv_t_destroy(mycdrv_t* device, struct class* deviceClass) {
 	device_destroy(deviceClass, device->cdev.dev);
 	kfree(device->ramdisk);
 	cdev_del(&device->cdev);
@@ -219,7 +219,7 @@ loff_t mycdrv_llseek(struct file *file, loff_t offset, int origin) {
         // Reallocate ramdisk to fulfill request
         device->ramdisk = krealloc(device->ramdisk, new_pos, GFP_KERNEL);
         // Set new space to zero.
-        memset(device->ramdisk + device->eof, 0, new_pos); // first arg +1?
+        memset(device->ramdisk + device->eof, 0, new_pos); // first arg may need +1
     }
 
     pr_info(MYDEV_NAME ": lseek(): new_pos=%lld\n", new_pos);
@@ -253,7 +253,7 @@ int __init my_init(void) {
 
     for(i = 0; i < NUM_DEVICES; i++) {
         dev_t d = MKDEV(MAJOR(first), i);
-	    tuxdrv_t_create(&devices, d, device_class);
+	    mycdrv_t_create(&devices, d, device_class);
     }
 
 	pr_info(MYDEV_NAME ": Devices created:\n");
@@ -282,7 +282,7 @@ void __exit my_exit(void) {
 		
 		pr_warn("\t%s%d\n", MYDEV_NAME, MINOR(e->cdev.dev));
 		
-		tuxdrv_t_destroy(e, device_class);
+		mycdrv_t_destroy(e, device_class);
 
 	}
 
