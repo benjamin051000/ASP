@@ -102,6 +102,11 @@ static void usb_kbd_irq(struct urb *urb)
 	struct usb_kbd *kbd = urb->context;
 	int i;
 
+    // &&&&&&&&&&&&&&&
+    printk(KERN_ALERT "Received a URB from in endpoint");
+    // &&&&&&&&&&&&&&&
+
+
 	switch (urb->status) {
 	case 0:			/* success */
 		break;
@@ -192,6 +197,10 @@ static void usb_kbd_led(struct urb *urb)
 	unsigned long flags;
 	struct usb_kbd *kbd = urb->context;
 
+    // &&&&&&&&&&&&&&&
+    printk(KERN_ALERT "Received an ACK that CTRL URB has been received by the device");
+    // &&&&&&&&&&&&&&&
+
 	if (urb->status)
 		hid_warn(urb->dev, "led urb status %d received\n",
 			 urb->status);
@@ -219,6 +228,10 @@ static int usb_kbd_open(struct input_dev *dev)
 {
 	struct usb_kbd *kbd = input_get_drvdata(dev);
 
+    // &&&&&&&&&&&&&&&
+    printk(KERN_ALERT "Just opened USB keyboard device");
+    // &&&&&&&&&&&&&&&
+
 	kbd->irq->dev = kbd->usbdev;
 	if (usb_submit_urb(kbd->irq, GFP_KERNEL))
 		return -EIO;
@@ -229,6 +242,10 @@ static int usb_kbd_open(struct input_dev *dev)
 static void usb_kbd_close(struct input_dev *dev)
 {
 	struct usb_kbd *kbd = input_get_drvdata(dev);
+
+    // &&&&&&&&&&&&&&&
+    printk(KERN_ALERT "Closing USB keyboard device");
+    // &&&&&&&&&&&&&&&
 
 	usb_kill_urb(kbd->irq);
 }
@@ -268,6 +285,10 @@ static int usb_kbd_probe(struct usb_interface *iface,
 	struct input_dev *input_dev;
 	int i, pipe, maxp;
 	int error = -ENOMEM;
+
+    // &&&&&&&&&&&&&&&
+    printk(KERN_ALERT "usbkbd driver probing USB keyboard device...");
+    // &&&&&&&&&&&&&&&
 
 	interface = iface->cur_altsetting;
 
@@ -369,6 +390,10 @@ fail1:
 static void usb_kbd_disconnect(struct usb_interface *intf)
 {
 	struct usb_kbd *kbd = usb_get_intfdata (intf);
+
+    // &&&&&&&&&&&&&&&
+    printk(KERN_ALERT "Time to say goodbye to USB keyboard device");
+    // &&&&&&&&&&&&&&&
 
 	usb_set_intfdata(intf, NULL);
 	if (kbd) {
