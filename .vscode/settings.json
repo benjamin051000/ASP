@@ -8,6 +8,13 @@
         "type_traits": "cpp",
         "iomanip": "cpp",
         "ostream": "cpp",
-        "array": "cpp"
+        "array": "cpp",
+        "ioctl.h": "c",
+        "features.h": "c",
+        "fcntl.h": "c",
+        "fstream": "c",
+        "errno.h": "c",
+        "list.h": "c",
+        "fs.h": "c"
     }
 }
