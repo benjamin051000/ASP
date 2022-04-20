@@ -120,7 +120,7 @@ static void usb_kbd_irq(struct urb *urb)
 	int i;
 
     // &&&&&&&&&&&&&&&
-    pr_err("[usb_kbd_irq] Received a URB from in endpoint");
+    // pr_err("[usb_kbd_irq] Received a URB from in endpoint");
     // &&&&&&&&&&&&&&&
 
 
@@ -136,7 +136,7 @@ static void usb_kbd_irq(struct urb *urb)
 		goto resubmit;
 	}
 	
-	
+
 	for (i = 0; i < 8; i++) {
 		unsigned int code = usb_kbd_keycode[i + 224];
 		int value = (kbd->new[0] >> i) & 1;
@@ -144,19 +144,22 @@ static void usb_kbd_irq(struct urb *urb)
 	}
 
 	for (i = 2; i < 8; i++) {
-
+		// Check key down events
 		if (kbd->old[i] > 3 && memscan(kbd->new + 2, kbd->old[i], 6) == kbd->new + 8) {
-			if (usb_kbd_keycode[kbd->old[i]])
+			if (usb_kbd_keycode[kbd->old[i]]) {
 				input_report_key(kbd->dev, usb_kbd_keycode[kbd->old[i]], 0);
+			}
 			else
 				hid_info(urb->dev,
 					 "Unknown key (scancode %#x) released.\n",
 					 kbd->old[i]);
 		}
 
+		// Check key up events
 		if (kbd->new[i] > 3 && memscan(kbd->old + 2, kbd->new[i], 6) == kbd->old + 8) {
-			if (usb_kbd_keycode[kbd->new[i]])
+			if (usb_kbd_keycode[kbd->new[i]]) {
 				input_report_key(kbd->dev, usb_kbd_keycode[kbd->new[i]], 1);
+			}
 			else
 				hid_info(urb->dev,
 					 "Unknown key (scancode %#x) pressed.\n",
@@ -180,26 +183,55 @@ static int usb_kbd_event(struct input_dev *dev, unsigned int type,
 			 unsigned int code, int value)
 {
 	unsigned long flags;
+	int num_lock_val, caps_lock_val, scroll_lock_val, compose_val, kana_val;
 	struct usb_kbd *kbd = input_get_drvdata(dev);
+	unsigned long old_led = 0;
 
 	pr_err("[usb_kbd_event] Running...");
 
 	if (type != EV_LED)
 		return -1;
 
+	pr_info("[usb_kbd_event] dev->led: %lu", dev->led[0]);
+	if(dev->led[0] != old_led) {
+		pr_warn("[usb_kbd_event] The LEDs changed.");
+	}
+	old_led = dev->led[0];
+
 	spin_lock_irqsave(&kbd->leds_lock, flags);
-	kbd->newleds = (!!test_bit(LED_KANA,    dev->led) << 3) | (!!test_bit(LED_COMPOSE, dev->led) << 3) |
-		       (!!test_bit(LED_SCROLLL, dev->led) << 2) | (!!test_bit(LED_CAPSL,   dev->led) << 1) |
-		       (!!test_bit(LED_NUML,    dev->led));
+
+	// Get values for new LED-associated keys.
+	num_lock_val = test_bit(LED_NUML, dev->led);
+	caps_lock_val = test_bit(LED_CAPSL, dev->led);
+	scroll_lock_val = test_bit(LED_SCROLLL, dev->led);
+	compose_val = test_bit(LED_COMPOSE, dev->led);
+	kana_val = test_bit(LED_KANA,    dev->led);
+	
+
+	
+	// Assemble new LED bit field
+	kbd->newleds = ( kana_val << 3) | (compose_val << 3) | 
+		(scroll_lock_val << 2) | (caps_lock_val << 1) | num_lock_val;
 
 	// TODO update mode/LEDs
 	if(kbd->mode == MODE1) {
 		pr_info("[usb_kbd_event] Keyboard is in mode 1.");
+		if(kbd->newleds == 0x1) {
+			kbd->newleds = LED_COMPOSE;
+			kbd->mode = MODE2;
+			pr_warn("Changed to mode2!");
+		}
 	}
 	else if (kbd->mode == MODE2) {
 		pr_info("[usb_kbd_event] Keyboard is in mode 2.");
-		
+		if(kbd->newleds == 0 || kbd->newleds == 0x2) {
+			kbd->newleds = 0;
+			kbd->mode = MODE1;
+			pr_warn("Changed to mode1!");
+		}
 	}
+
+	pr_alert("[usb_kbd_event] new_leds: 0x%02X", (unsigned)(kbd->newleds & 0xFF));
 
 	if (kbd->led_urb_submitted){
 		spin_unlock_irqrestore(&kbd->leds_lock, flags);
@@ -232,7 +264,7 @@ static void usb_kbd_led(struct urb *urb)
 	struct usb_kbd *kbd = urb->context;
 
     // &&&&&&&&&&&&&&&
-    pr_err("[usb_kbd_led] Received ACK that CTRL URB was received by the device");
+    pr_err("[usb_kbd_led] LED ACK");
     // &&&&&&&&&&&&&&&
 
 	if (urb->status)
