@@ -229,6 +229,13 @@ static int usb_kbd_event(struct input_dev *dev, unsigned int type,
 			kbd->mode = MODE1;
 			pr_warn("Changed to mode1!");
 		}
+		// If we aren't changing modes, then simply flip the LED.
+		else if(kbd->newleds == 0x3) {
+			kbd->newleds = 0x1;
+		}
+		else if(kbd->newleds == 0x1) {
+			kbd->newleds = 0x3;
+		}
 	}
 
 	pr_alert("[usb_kbd_event] new_leds: 0x%02X", (unsigned)(kbd->newleds & 0xFF));
