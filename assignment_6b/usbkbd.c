@@ -12,6 +12,11 @@
  * Vojtech Pavlik, Simunkova 1594, Prague 8, 182 00 Czech Republic
  */
 
+// Simple define to remove warnings from printks
+#ifndef KBUILD_MODNAME
+#define KBUILD_MODNAME "usbkbd"
+#endif
+
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/kernel.h>
@@ -31,6 +36,14 @@
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
+
+
+/**
+ * @brief Specifies which mode we are in.
+ * MODE1 is normal caps lock LED behavior.
+ * MODE2 is inverted behavior.
+ */
+enum Mode {MODE1 = 1, MODE2};
 
 static const unsigned char usb_kbd_keycode[256] = {
 	  0,  0,  0,  0, 30, 48, 46, 32, 18, 33, 34, 35, 23, 36, 37, 38,
@@ -95,6 +108,10 @@ struct usb_kbd {
 	spinlock_t leds_lock;
 	bool led_urb_submitted;
 
+	/**
+	 * Mode the keyboard is in.
+	 */
+	enum Mode mode;
 };
 
 static void usb_kbd_irq(struct urb *urb)
@@ -103,7 +120,7 @@ static void usb_kbd_irq(struct urb *urb)
 	int i;
 
     // &&&&&&&&&&&&&&&
-    printk(KERN_ALERT "Received a URB from in endpoint");
+    pr_err("[usb_kbd_irq] Received a URB from in endpoint");
     // &&&&&&&&&&&&&&&
 
 
@@ -118,9 +135,13 @@ static void usb_kbd_irq(struct urb *urb)
 	default:		/* error */
 		goto resubmit;
 	}
-
-	for (i = 0; i < 8; i++)
-		input_report_key(kbd->dev, usb_kbd_keycode[i + 224], (kbd->new[0] >> i) & 1);
+	
+	
+	for (i = 0; i < 8; i++) {
+		unsigned int code = usb_kbd_keycode[i + 224];
+		int value = (kbd->new[0] >> i) & 1;
+		input_report_key(kbd->dev, code, value);
+	}
 
 	for (i = 2; i < 8; i++) {
 
@@ -161,7 +182,7 @@ static int usb_kbd_event(struct input_dev *dev, unsigned int type,
 	unsigned long flags;
 	struct usb_kbd *kbd = input_get_drvdata(dev);
 
-	pr_alert("kbd_event running...");
+	pr_err("[usb_kbd_event] Running...");
 
 	if (type != EV_LED)
 		return -1;
@@ -170,6 +191,15 @@ static int usb_kbd_event(struct input_dev *dev, unsigned int type,
 	kbd->newleds = (!!test_bit(LED_KANA,    dev->led) << 3) | (!!test_bit(LED_COMPOSE, dev->led) << 3) |
 		       (!!test_bit(LED_SCROLLL, dev->led) << 2) | (!!test_bit(LED_CAPSL,   dev->led) << 1) |
 		       (!!test_bit(LED_NUML,    dev->led));
+
+	// TODO update mode/LEDs
+	if(kbd->mode == MODE1) {
+		pr_info("[usb_kbd_event] Keyboard is in mode 1.");
+	}
+	else if (kbd->mode == MODE2) {
+		pr_info("[usb_kbd_event] Keyboard is in mode 2.");
+		
+	}
 
 	if (kbd->led_urb_submitted){
 		spin_unlock_irqrestore(&kbd->leds_lock, flags);
@@ -191,6 +221,8 @@ static int usb_kbd_event(struct input_dev *dev, unsigned int type,
 
 	spin_unlock_irqrestore(&kbd->leds_lock, flags);
 
+	pr_err("[usb_kbd_event] Done.");
+
 	return 0;
 }
 
@@ -200,7 +232,7 @@ static void usb_kbd_led(struct urb *urb)
 	struct usb_kbd *kbd = urb->context;
 
     // &&&&&&&&&&&&&&&
-    pr_alert("Received an ACK that CTRL URB has been received by the device");
+    pr_err("[usb_kbd_led] Received ACK that CTRL URB was received by the device");
     // &&&&&&&&&&&&&&&
 
 	if (urb->status)
@@ -231,7 +263,7 @@ static int usb_kbd_open(struct input_dev *dev)
 	struct usb_kbd *kbd = input_get_drvdata(dev);
 
     // &&&&&&&&&&&&&&&
-    pr_alert("Opening USB keyboard device");
+    pr_err("[usb_kbd_led] Opening USB keyboard device");
     // &&&&&&&&&&&&&&&
 
 	kbd->irq->dev = kbd->usbdev;
@@ -239,7 +271,7 @@ static int usb_kbd_open(struct input_dev *dev)
 		return -EIO;
 
 	// &&&&&&&&&&&&&&&
-    pr_alert("Opened!");
+    pr_err("[usb_kbd_led] Opened!");
     // &&&&&&&&&&&&&&&
 
 	return 0;
@@ -250,12 +282,12 @@ static void usb_kbd_close(struct input_dev *dev)
 	struct usb_kbd *kbd = input_get_drvdata(dev);
 
     // &&&&&&&&&&&&&&&
-    pr_alert("Closing USB keyboard device");
+    pr_err("[usb_kbd_led] Closing USB keyboard device");
     // &&&&&&&&&&&&&&&
 
 	usb_kill_urb(kbd->irq);
 
-	pr_alert("Closed.");
+	pr_err("[usb_kbd_led] Closed.");
 }
 
 static int usb_kbd_alloc_mem(struct usb_device *dev, struct usb_kbd *kbd)
@@ -294,10 +326,6 @@ static int usb_kbd_probe(struct usb_interface *iface,
 	int i, pipe, maxp;
 	int error = -ENOMEM;
 
-    // &&&&&&&&&&&&&&&
-    printk(KERN_ALERT "usbkbd driver probing USB keyboard device...");
-    // &&&&&&&&&&&&&&&
-
 	interface = iface->cur_altsetting;
 
 	if (interface->desc.bNumEndpoints != 1)
@@ -320,6 +348,7 @@ static int usb_kbd_probe(struct usb_interface *iface,
 
 	kbd->usbdev = dev;
 	kbd->dev = input_dev;
+	kbd->mode = MODE1; // Set default mode to MODE1
 	spin_lock_init(&kbd->leds_lock);
 
 	if (dev->manufacturer)
@@ -386,7 +415,6 @@ static int usb_kbd_probe(struct usb_interface *iface,
 	usb_set_intfdata(iface, kbd);
 	device_set_wakeup_enable(&dev->dev, 1);
 
-	pr_alert("Done probing.");
 	return 0;
 
 fail2:
@@ -402,7 +430,7 @@ static void usb_kbd_disconnect(struct usb_interface *intf)
 	struct usb_kbd *kbd = usb_get_intfdata (intf);
 
     // &&&&&&&&&&&&&&&
-    pr_alert("Disconnecting USB keyboard device...");
+    pr_err("[usb_kbd_disconnect] Disconnecting USB keyboard device...");
     // &&&&&&&&&&&&&&&
 
 	usb_set_intfdata(intf, NULL);
@@ -414,7 +442,7 @@ static void usb_kbd_disconnect(struct usb_interface *intf)
 		kfree(kbd);
 	}
 
-	pr_alert("Disconnected.");
+	pr_err("[usb_kbd_disconnect] Disconnected.");
 }
 
 static const struct usb_device_id usb_kbd_id_table[] = {
