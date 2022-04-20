@@ -161,6 +161,8 @@ static int usb_kbd_event(struct input_dev *dev, unsigned int type,
 	unsigned long flags;
 	struct usb_kbd *kbd = input_get_drvdata(dev);
 
+	pr_alert("kbd_event running...");
+
 	if (type != EV_LED)
 		return -1;
 
@@ -198,7 +200,7 @@ static void usb_kbd_led(struct urb *urb)
 	struct usb_kbd *kbd = urb->context;
 
     // &&&&&&&&&&&&&&&
-    printk(KERN_ALERT "Received an ACK that CTRL URB has been received by the device");
+    pr_alert("Received an ACK that CTRL URB has been received by the device");
     // &&&&&&&&&&&&&&&
 
 	if (urb->status)
@@ -229,12 +231,16 @@ static int usb_kbd_open(struct input_dev *dev)
 	struct usb_kbd *kbd = input_get_drvdata(dev);
 
     // &&&&&&&&&&&&&&&
-    printk(KERN_ALERT "Just opened USB keyboard device");
+    pr_alert("Opening USB keyboard device");
     // &&&&&&&&&&&&&&&
 
 	kbd->irq->dev = kbd->usbdev;
 	if (usb_submit_urb(kbd->irq, GFP_KERNEL))
 		return -EIO;
+
+	// &&&&&&&&&&&&&&&
+    pr_alert("Opened!");
+    // &&&&&&&&&&&&&&&
 
 	return 0;
 }
@@ -244,10 +250,12 @@ static void usb_kbd_close(struct input_dev *dev)
 	struct usb_kbd *kbd = input_get_drvdata(dev);
 
     // &&&&&&&&&&&&&&&
-    printk(KERN_ALERT "Closing USB keyboard device");
+    pr_alert("Closing USB keyboard device");
     // &&&&&&&&&&&&&&&
 
 	usb_kill_urb(kbd->irq);
+
+	pr_alert("Closed.");
 }
 
 static int usb_kbd_alloc_mem(struct usb_device *dev, struct usb_kbd *kbd)
@@ -377,6 +385,8 @@ static int usb_kbd_probe(struct usb_interface *iface,
 
 	usb_set_intfdata(iface, kbd);
 	device_set_wakeup_enable(&dev->dev, 1);
+
+	pr_alert("Done probing.");
 	return 0;
 
 fail2:
@@ -392,7 +402,7 @@ static void usb_kbd_disconnect(struct usb_interface *intf)
 	struct usb_kbd *kbd = usb_get_intfdata (intf);
 
     // &&&&&&&&&&&&&&&
-    printk(KERN_ALERT "Time to say goodbye to USB keyboard device");
+    pr_alert("Disconnecting USB keyboard device...");
     // &&&&&&&&&&&&&&&
 
 	usb_set_intfdata(intf, NULL);
@@ -403,6 +413,8 @@ static void usb_kbd_disconnect(struct usb_interface *intf)
 		usb_kbd_free_mem(interface_to_usbdev(intf), kbd);
 		kfree(kbd);
 	}
+
+	pr_alert("Disconnected.");
 }
 
 static const struct usb_device_id usb_kbd_id_table[] = {
